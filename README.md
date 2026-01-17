@@ -1,12 +1,27 @@
 # MIA-RAG-Implementation
 
-This project implements a **Membership Inference Attack (MIA)** pipeline against **Retrieval-Augmented Generation (RAG)** systems. It evaluates whether a specific text document was part of the RAG system's knowledge base (member) or not (non-member) by analyzing the model's ability to fill in masked tokens.
+This project implements a **Membership Inference Attack (MIA)** pipeline against **Retrieval-Augmented Generation (RAG)** systems. based on the research paper "Mask-based Membership Inference Attacks for Retrieval-Augmented Generation" (Liu et al., 2025). It evaluates whether a specific text document was part of the RAG system's knowledge base (member) or not (non-member).
+
+## Project Goal
+Build a local RAG system and attack it using a "Mask-Based" approach. The attack works by masking "hard-to-predict" words in a document and asking the RAG system to fill them in.
+- **Hypothesis**: If the document is in the RAG's database, it will retrieve the exact text and fill the masks perfectly. If not, it will struggle.
+
+## Key Results
+Based on our ablation studies, the attack is highly effective under specific configurations:
+
+- **Best Configuration**: `llama3` + `sentence-transformers/all-MiniLM-L6-v2` + `faiss` achieved **AUC: 1.0000**.
+- **LLM Performance**: `llama3` consistently outperformed `mistral` and `phi3`, with an average AUC of **0.99**.
+- **Dataset**: The attack was most effective on the **Medical** dataset (AUC 0.95), suggesting domain-specific data is more vulnerable than general text.
+
+Running `process_results.py` will generate a detailed [Results Report](results_report.md) and a raw CSV of all experiments.
 
 ## Project Structure
 
 - `mia_rag_attack.py`: The main script that runs the ablation studies and attacks.
-- `experiment_results.md`: Automatically generated log of experiment results (AUC-ROC, Accuracy, etc.).
-- `CONTEXT.md`: Background context on the research (if applicable).
+- `process_results.py`: Script to parse results and generate reports.
+- `experiment_results.md`: Raw log of experiment results.
+- `results_report.md`: detailed analysis of the experiments.
+- `experiment_data.csv`: Structured CSV data of all runs.
 
 ## Prerequisites
 
@@ -43,17 +58,3 @@ The script automatically iterates through the following combinations:
 -   **Embeddings**: `sentence-transformers/all-MiniLM-L6-v2`, `BAAI/bge-small-en-v1.5`
 -   **Retrievers**: `FAISS` (Dense), `BM25` (Sparse)
 -   **Datasets**: `general` (WikiText), `medical` (PubMedQA), `legal` (BillSum)
-
-### Datasets
-The project uses the HuggingFace `datasets` library to fetch real-world data:
--   **General**: `wikitext-2-raw-v1`
--   **Medical**: `pubmed_qa`
--   **Legal**: `billsum`
-
-*Note: The first run will require an internet connection to download these datasets.*
-
-## Results
-Results are appended to `experiment_results.md` after each configuration run. The metrics include:
--   **AUC-ROC**
--   Accuracy, Precision, Recall, F1 Score
--   Confusion Matrix
