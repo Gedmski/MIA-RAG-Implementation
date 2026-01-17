@@ -1,0 +1,259 @@
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=llama3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=mistral, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=sentence-transformers/all-MiniLM-L6-v2, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=faiss, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=general)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=medical)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
+Failed Config: Config(LLM=phi3, Embed=BAAI/bge-small-en-v1.5, Retriever=bm25, Dataset=legal)
+Error: CUDA error: device-side assert triggered
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+
