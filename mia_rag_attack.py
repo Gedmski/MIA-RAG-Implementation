@@ -2,633 +2,637 @@
 import os
 import random
 import numpy as np
-import pandas as pd
 import json
 import torch
-import torch.nn.functional as F
-from typing import List, Dict, Tuple, Optional
-from tqdm import tqdm
-import matplotlib.pyplot as plt
-from sklearn.metrics import roc_curve, auc, roc_auc_score, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
-import re
-from datetime import datetime
-import time
-
-# Datasets
-try:
-    from datasets import load_dataset
-except ImportError:
-    print("Warning: 'datasets' library not found. Please install: pip install datasets")
-    load_dataset = None
-
-
-# LangChain & RAG imports
-import langchain
-import requests
-import json
 import sys
-from langchain_core.documents import Document
-from langchain_classic.chains.retrieval_qa.base import RetrievalQA
-from langchain_core.prompts import PromptTemplate
+import re
+from typing import List, Dict, Tuple, Optional, Set
+from tqdm import tqdm
+from datetime import datetime
+import warnings
 
-# Try modern imports first (LangChain v0.1+)
+# Suppress warnings
+warnings.filterwarnings("ignore")
+
+# --- Dependencies Check ---
 try:
-    from langchain_ollama import OllamaLLM
-    OllamaClass = OllamaLLM
-except ImportError:
-    try:
-        from langchain_community.llms import Ollama
-        OllamaClass = Ollama
-    except ImportError:
-        from langchain.llms import Ollama
-        OllamaClass = Ollama
+    import pandas as pd
+    from sklearn.metrics import roc_curve, auc, roc_auc_score, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+    from transformers import AutoTokenizer, AutoModelForCausalLM, AutoModelForSeq2SeqLM, logging as transformers_logging
+    transformers_logging.set_verbosity_error()
+except ImportError as e:
+    print(f"CRITICAL: Missing dependencies. Please install: pandas scikit-learn transformers torch")
+    print(f"Error: {e}")
+    sys.exit(1)
 
+# LangChain Imports
 try:
     from langchain_huggingface import HuggingFaceEmbeddings
     from langchain_community.vectorstores import FAISS
-    from langchain_text_splitters import RecursiveCharacterTextSplitter
+    from langchain_core.documents import Document
+    from langchain_core.prompts import PromptTemplate
+    from langchain_ollama import OllamaLLM
 except ImportError:
-    # Legacy Fallbacks
-    from langchain.embeddings import HuggingFaceEmbeddings
-    from langchain.vectorstores import FAISS
-    from langchain.text_splitter import RecursiveCharacterTextSplitter
-
-
-try:
-    from langchain_community.retrievers import BM25Retriever
-except ImportError:
+    # Attempt legacy imports
     try:
-        from langchain.retrievers import BM25Retriever
+        from langchain.embeddings import HuggingFaceEmbeddings
+        from langchain.vectorstores import FAISS
+        from langchain.docstore.document import Document
+        from langchain.prompts import PromptTemplate
+        from langchain_community.llms import Ollama as OllamaLLM
     except ImportError:
-        BM25Retriever = None
+        print("CRITICAL: Missing LangChain dependencies. Please install: langchain langchain-community langchain-huggingface langchain-ollama faiss-cpu")
+        sys.exit(1)
 
-
-def ensure_ollama_model(model_name: str, base_url: str = "http://localhost:11434"):
-    """
-    Checks if the specified model exists in Ollama. If not, attempts to pull it.
-    """
-    print(f"Checking for Ollama model: {model_name}...")
-    try:
-        # 1. List local models
-        response = requests.get(f"{base_url}/api/tags")
-        if response.status_code == 200:
-            models = [m['name'] for m in response.json().get('models', [])]
-            # Handle tags like 'llama3:latest' vs 'llama3'
-            if model_name in models or f"{model_name}:latest" in models:
-                print(f"Model '{model_name}' is ready.")
-                return True
-            
-            # Check if any version of the model exists (e.g. user asked for llama3, we have llama3:8b)
-            # Simple substring check might be risky but helpful
-            for m in models:
-                if model_name in m:
-                    print(f"Found related model '{m}', assuming it covers '{model_name}' request or ignoring.")
-                    # We usually want exact match or we pull. 
-                    # If user asks for 'llama3', 'llama3:latest' is the target.
-                    if m == f"{model_name}:latest":
-                         print(f"Model '{model_name}' is ready (found {m}).")
-                         return True
-
-        # 2. Pull model if missing
-        print(f"Model '{model_name}' not found locally. Pulling from registry (this may take a while)...")
-        
-        # Streaming pull to show progress
-        pull_resp = requests.post(f"{base_url}/api/pull", json={"name": model_name}, stream=True)
-        if pull_resp.status_code == 200:
-            for line in pull_resp.iter_lines():
-                if line:
-                    data = json.loads(line.decode('utf-8'))
-                    status = data.get('status', '')
-                    completed = data.get('completed', 0)
-                    total = data.get('total', 0)
-                    if total > 0:
-                        percent = (completed / total) * 100
-                        sys.stdout.write(f"\rPulling {model_name}: {status} - {percent:.1f}%")
-                        sys.stdout.flush()
-                    else:
-                        sys.stdout.write(f"\rPulling {model_name}: {status}")
-                        sys.stdout.flush()
-            print(f"\nModel '{model_name}' pulled successfully.")
-            return True
-        else:
-            print(f"Failed to pull model '{model_name}'. Status: {pull_resp.status_code}")
-            return False
-            
-    except Exception as e:
-        print(f"Error checking/pulling Ollama model: {e}")
-        return False
-
-# Transformers for Proxy Model
-from transformers import GPT2LMHeadModel, GPT2Tokenizer, AutoModelForCausalLM, AutoTokenizer
-
-
-# Configuration for Ablation Studies
+# --- Configuration ---
 class MIAConfig:
     def __init__(self, 
                  llm_model: str = "llama3",
                  embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2",
-                 retriever_type: str = "faiss",
-                 dataset_type: str = "general",
+                 dataset_type: str = "healthcaremagic",
                  proxy_model: str = "gpt2",
                  num_masks: int = 5,
-                 top_k_retrieval: int = 3):
+                 top_k_retrieval: int = 10,
+                 masking_strategy: str = "hard", # 'hard' or 'random'
+                 use_spelling_correction: bool = True,
+                 retriever_type: str = "faiss", # 'faiss' or 'bm25'
+                 index_size: int = 500,
+                 eval_size: int = 50):
         self.llm_model = llm_model
         self.embedding_model = embedding_model
-        self.retriever_type = retriever_type
         self.dataset_type = dataset_type
         self.proxy_model = proxy_model
         self.num_masks = num_masks
         self.top_k_retrieval = top_k_retrieval
-
+        self.masking_strategy = masking_strategy
+        self.use_spelling_correction = use_spelling_correction
+        self.retriever_type = retriever_type
+        self.index_size = index_size
+        self.eval_size = eval_size
+        
     def __repr__(self):
-        return f"Config(LLM={self.llm_model}, Embed={self.embedding_model}, Retriever={self.retriever_type}, Dataset={self.dataset_type})"
+        return f"Config(LLM={self.llm_model}, Data={self.dataset_type}, Emb={self.embedding_model}, Ret={self.retriever_type}, Idx={self.index_size}, Eval={self.eval_size})"
 
-# --- Step 1: Data Preparation ---
-def generate_synthetic_data(dataset_type: str = "general") -> List[str]:
-    """Generates synthetic data based on the requested type (Fallback)."""
-    general_topics = [
-        "Photosynthesis is the process used by plants, algae and certain bacteria to harness energy from sunlight and turn it into chemical energy.",
-        "The history of quantum computing began in the early 1980s when physicist Paul Benioff proposed a quantum mechanical model of the Turing machine.",
-        "The Great Wall of China is a series of fortifications that were built across the historical northern borders of ancient Chinese states.",
-        "Artificial intelligence (AI) is intelligence demonstrated by machines, as opposed to the natural intelligence displayed by animals including humans.",
-        "The theory of relativity usually encompasses two interrelated theories by Albert Einstein: special relativity and general relativity.",
-        "DNA replication is the biological process of producing two identical replicas of DNA from one original DNA molecule.",
-        "The industrial revolution was the transition to new manufacturing processes in Great Britain, continental Europe, and the United States.",
-        "Blockchain is a decentralized, distributed and public digital ledger that is used to record transactions across many computers.",
-        "Climate change describes global warming—the ongoing increase in global average temperature—and its effects on Earth's climate system.",
-        "The human brain is the central organ of the human nervous system, and with the spinal cord makes up the central nervous system.",
-        "Antibiotics are medications used to treat bacterial infections. They work by killing bacteria or preventing them from reproducing.",
-        "The Internet of Things (IoT) describes the network of physical objects identifying themselves to other devices and servers over the Internet."
-    ]
-    
-    technical_topics = [
-        "In computer science, a B-tree is a self-balancing tree data structure that maintains sorted data and allows searches, sequential access, insertions, and deletions in logarithmic time.",
-        "Gradient descent is a first-order iterative optimization algorithm for finding a local minimum of a differentiable function.",
-        "Symmetric-key algorithms are algorithms for cryptography that use the same cryptographic keys for both encryption of plaintext and decryption of ciphertext.",
-        "A convolutional neural network (CNN) is a class of deep neural networks, most commonly applied to analyzing visual imagery.",
-        "Docker is a set of platform as a service (PaaS) products that use OS-level virtualization to deliver software in packages called containers.",
-        "Kubernetes is an open-source container-orchestration system for automating computer application deployment, scaling, and management.",
-        "Recursion in computer science is a method of solving a problem where the solution depends on solutions to smaller instances of the same problem."
-    ]
-    
-    legal_topics = [
-        "A contract is a legally binding agreement which recognizes and governs the rights and duties of the parties to the agreement.",
-        "Tort law is the area of law that covers most civil suits using case law and statutes to provide relief for wrongful acts.",
-        "Intellectual property is a category of property that includes intangible creations of the human intellect.",
-        "Habeas corpus is a recourse in law through which a person can report an unlawful detention or imprisonment to a court.",
-        "Double jeopardy is a procedural defence that prevents an accused person from being tried again on the same (or similar) charges.",
-        "Affidavit is a written statement confirmed by oath or affirmation, for use as evidence in court.",
-        "Subpoena is a writ ordering a person to attend a court."
-    ]
-
-    if dataset_type == "medical": 
-        return general_topics + technical_topics
-    elif dataset_type == "legal":
-        return legal_topics * 2
-    elif dataset_type == "technical":
-        return technical_topics * 2
-    else:
-        return general_topics + technical_topics + legal_topics
-def load_real_dataset(dataset_type: str = "general", sample_size: int = 50) -> List[str]:
+# --- 1. Data Loading & Preprocessing ---
+def load_real_dataset(dataset_type: str = "healthcaremagic", sample_size: int = 50) -> List[Document]:
     """
-    Loads real-world datasets from HuggingFace.
+    Loads specific datasets from the Liu et al. (2025) paper.
+    Strictly truncates to 512 tokens to prevent CUDA errors.
     """
     texts = []
+    print(f"Loading dataset: {dataset_type}...")
     
-    if load_dataset is None:
-        print("Using synthetic fallback (datasets lib missing)...")
-        return generate_synthetic_data(dataset_type)
-
-    print(f"Loading real dataset: {dataset_type}...")
     try:
-        if dataset_type == "general":
-            # WikiText-2
-            ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test", trust_remote_code=True)
-            # Filter empty or short lines
-            candidates = [x['text'] for x in ds if len(x['text'].strip()) > 100]
-            texts = candidates[:sample_size]
-            
-        elif dataset_type == "medical":
-            # PubMed QA
-            ds = load_dataset("pubmed_qa", "pqa_labeled", split="train", trust_remote_code=True)
-            # Contexts are lists of strings
-            candidates = [" ".join(x['context']['contexts']) for x in ds]
-            # Filter short
-            candidates = [c for c in candidates if len(c) > 100]
-            texts = candidates[:sample_size]
-            
-        elif dataset_type == "legal":
-            # BillSum (US Legislation)
-            ds = load_dataset("billsum", split="test", trust_remote_code=True)
-            candidates = [x['text'] for x in ds if len(x['text']) > 100]
+        from datasets import load_dataset
+        
+        if dataset_type == "healthcaremagic":
+            # Paper Source: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+            try:
+                # Removed trust_remote_code=True as it is deprecated for some datasets or ignored
+                ds = load_dataset("RafaelMPereira/HealthCareMagic-100k-Chat-Format-en", split="train")
+                
+                # Check keys dynamically
+                example = ds[0]
+                # print(f"DEBUG: Dataset Keys: {example.keys()}")
+                
+                input_key = 'input' if 'input' in example else 'instruction'
+                output_key = 'output' if 'output' in example else 'response'
+                
+                if input_key not in example:
+                     # Fallback to just taking values if unnamed
+                     print(f"Warning: Expected keys not found. Keys: {example.keys()}")
+                     candidates = [str(x) for x in ds]
+                else:
+                    candidates = [f"Patient: {x.get(input_key, '')}\nDoctor: {x.get(output_key, '')}" for x in ds]
+                    
+                texts = [c for c in candidates if len(c) > 200][:sample_size]
+            except Exception as dim_err:
+                print(f"Error specifically in healthcaremagic formatting: {dim_err}")
+                raise dim_err
+
+        elif dataset_type == "msmarco":
+            # Paper Source: MS-MARCO (Validation Set)
+            ds = load_dataset("ms_marco", "v1.1", split="validation", streaming=True)
+            # Take first N passages.
+            candidates = []
+            for row in ds:
+                passages = row.get('passages', {})
+                texts_list = passages.get('passage_text', [])
+                candidates.extend(texts_list)
+                if len(candidates) >= sample_size * 2: break
+            texts = [c for c in candidates if len(c) > 100][:sample_size]
+
+        elif dataset_type == "nq":
+            # Paper Source: LLukas22/nq-simplified
+            ds = load_dataset("LLukas22/nq-simplified", split="test")
+            candidates = []
+            for x in ds:
+                 text = x.get('context') or x.get('document_text') or x.get('passage') or x.get('long_answer', '')
+                 if len(text) > 200:
+                     candidates.append(text)
             texts = candidates[:sample_size]
             
         else:
-            # Fallback to synthetic
-            return generate_synthetic_data("general")
-            
+            print(f"Unknown dataset {dataset_type}, falling back to WikiText-2 (General)")
+            ds = load_dataset("wikitext", "wikitext-2-raw-v1", split="test")
+            texts = [x['text'] for x in ds if len(x['text']) > 200][:sample_size]
+
     except Exception as e:
-        print(f"Error loading dataset {dataset_type}: {e}")
-        print("Falling back to synthetic data.")
-        return generate_synthetic_data(dataset_type)
-        
-    if len(texts) < sample_size:
-        print(f"Warning: Only found {len(texts)} samples for {dataset_type}.")
-        
-    # Clean up newlines for consistency
-    texts = [t.replace('\n', ' ').strip() for t in texts]
-    
-    # Truncate to max characters to avoid Tokenizer/CUDA errors (e.g. 512 token limit)
-    # 2048 chars is roughly 400-600 tokens
-    texts = [t[:2048] for t in texts]
-    
-    return texts
+        print(f"Error loading {dataset_type}: {e}")
+        # Synthetic Fallback - MAKE IT LONG ENOUGH > 200 chars
+        texts = [f"Synthetic document {i} about {dataset_type}. This is a filler text to ensure the system has enough content to process and does not fail due to short length checks. " * 10 for i in range(sample_size)]
 
+    # Process and Truncate
+    documents = []
+    
+    # Debug: Print first text if available to verify content
+    if texts:
+        print(f"Sample text length: {len(texts[0])} chars")
+        
+    for i, t in enumerate(texts):
+        # Clean text
+        clean_text = t.replace('\n', ' ').strip()
+        # Strict truncation for MBA stability
+        truncated_text = clean_text[:2500] 
+        
+        documents.append(Document(
+            page_content=truncated_text,
+            metadata={"id": i, "source": dataset_type}
+        ))
+        
+    return documents
 
-def prepare_datasets(texts: List[str], split_ratio: float = 0.8) -> Tuple[List[str], List[str]]:
-    # Shuffle to ensure randomness
+def prepare_splits(documents: List[Document], split_ratio: float = 0.8) -> Tuple[List[Document], List[Document]]:
+    if not documents:
+        print("Warning: No documents to split!")
+        return [], []
+        
     random.seed(42)
-    random.shuffle(texts)
-    split_idx = int(len(texts) * split_ratio)
-    member_set = texts[:split_idx]
-    non_member_set = texts[split_idx:]
-    return member_set, non_member_set
+    shuffled = documents.copy()
+    random.shuffle(shuffled)
+    split_idx = int(len(shuffled) * split_ratio)
+    return shuffled[:split_idx], shuffled[split_idx:]
 
-# --- Step 2: Proxy Model (Mask Generation) ---
-class ProxyModel:
-    def __init__(self, model_name: str = "gpt2", device: str = None):
-        self.model_name = model_name
+# --- 2. Mask Generation (MBA Algorithms) ---
+class MaskGenerator:
+    def __init__(self, model_name: str = "gpt2", device: str = None, use_spelling: bool = True):
         self.device = device if device else ("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"Loading Proxy Model: {model_name} on {self.device}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device)
-        self.model.eval()
+        print(f"Loading Mask Generator ({model_name}) on {self.device}...")
+        
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+            self.model = AutoModelForCausalLM.from_pretrained(model_name).to(self.device).eval()
+        except Exception as e:
+            print(f"Error loading proxy model {model_name}: {e}")
+            self.model = None
+        
+        self.use_spelling = use_spelling
+        self.spelling_model = None
+        self.spelling_tokenizer = None
+        
+        if self.use_spelling:
+            try:
+                print("Loading Spelling Correction Model (oliverguhr/spelling-correction-english-base)...")
+                self.spelling_tokenizer = AutoTokenizer.from_pretrained("oliverguhr/spelling-correction-english-base")
+                self.spelling_model = AutoModelForSeq2SeqLM.from_pretrained("oliverguhr/spelling-correction-english-base").to(self.device).eval()
+            except Exception as e:
+                print(f"Warning: Could not load spelling model: {e}. Disabling spelling correction.")
+                self.use_spelling = False
 
-    def rank_words(self, text: str, num_masks: int = 5) -> Tuple[str, Dict[str, str]]:
+    def is_valid_word(self, word: str) -> bool:
+        """Filter out stopwords, punctuation, and short tokens."""
+        if len(word) < 3: return False
+        if not re.match(r'^[a-zA-Z]+$', word): return False
+        stopwords = {'the', 'and', 'that', 'with', 'this', 'from', 'have', 'was', 'were', 'which', 'for', 'are', 'not', 'but'}
+        if word.lower() in stopwords: return False
+        return True
+
+    def get_fragmented_words(self, text: str) -> List[Dict]:
         """
-        Identifies the 'hardest to predict' words and masks them.
-        Returns: masked_text, ground_truth_dict
+        Algorithm 2: Extract words that are split by tokenizer.
         """
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=1024).to(self.device)
-        input_ids = inputs["input_ids"]
+        tokens = self.tokenizer.tokenize(text)
+        # Reconstruct mapping to original word indices is complex with just tokenize.
+        # Simpler approach: Iterate words in text, check if they tokenize to multiple.
         
-        with torch.no_grad():
-            outputs = self.model(**inputs, labels=input_ids)
-            logits = outputs.logits
-            
-            shift_logits = logits[..., :-1, :].contiguous()
-            shift_labels = input_ids[..., 1:].contiguous()
-            
-            loss_fct = torch.nn.CrossEntropyLoss(reduction='none')
-            loss = loss_fct(shift_logits.view(-1, shift_logits.size(-1)), shift_labels.view(-1))
-            
-        # Get top-k indices. adjusting for shift (loss index i corresponds to token i+1)
-        top_k_indices = torch.argsort(loss, descending=True)[:num_masks]
-        top_k_indices = top_k_indices + 1 
+        fragmented = []
+        words = text.split()
+        current_char_idx = 0
         
-        top_k_indices = top_k_indices.cpu().numpy().tolist()
-        masked_tokens = list(input_ids[0].cpu().numpy())
+        for i, word in enumerate(words):
+            word_clean = re.sub(r'[^\w\s]', '', word) # remove punct
+            if not word_clean: continue
+            
+            sub_tokens = self.tokenizer.tokenize(word_clean)
+            if len(sub_tokens) > 1:
+                fragmented.append({
+                    "word": word_clean,
+                    "index": i,
+                    "tokens": sub_tokens
+                })
+        return fragmented
+
+    def correct_spelling(self, text_segment: str) -> str:
+        if not self.use_spelling: return text_segment
+        try:
+            inputs = self.spelling_tokenizer(text_segment, return_tensors="pt", max_length=128, truncation=True).to(self.device)
+            with torch.no_grad():
+                outputs = self.spelling_model.generate(**inputs, max_length=128)
+            return self.spelling_tokenizer.decode(outputs[0], skip_special_tokens=True)
+        except:
+            return text_segment
+
+    def generate_masks(self, text: str, num_masks: int = 5, strategy: str = "hard") -> Tuple[str, Dict[str, List[str]]]:
+        """
+        Generates masks using MBA heuristics.
+        Returns: 
+            masked_text: str
+            ground_truth: Dict[mask_token, List[answers]] (List because original + corrected)
+        """
+        words = text.split()
+        if len(words) < num_masks * 2:
+            return text, {} # Too short
+
+        candidates = []
+        
+        if strategy == "random":
+            # Random strategy
+            valid_indices = [i for i, w in enumerate(words) if self.is_valid_word(w)]
+            selected_indices = random.sample(valid_indices, min(len(valid_indices), num_masks))
+        else:
+            # "Hard" strategy - Proxy Model Ranking
+            # We score every word. This is expensive, so we optimize by batching or chunking if needed.
+            # Simplified: Score words by taking surrounding context.
+            
+            # To strictly follow paper: Compute loss for every token? 
+            # Optimization: Just use perplexity of word given previous context.
+            
+            inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=1024).to(self.device)
+            input_ids = inputs["input_ids"][0]
+            
+            with torch.no_grad():
+                outputs = self.model(inputs["input_ids"], labels=inputs["input_ids"])
+                logits = outputs.logits[0]
+                
+            # Logits [seq_len, vocab]. Prob for token at i is logits[i-1]
+            # This maps tokens to scores. We need to map Words to expected scores.
+            # Heuristic: Map back roughly or just use word-based scan for simplicity?
+            # Paper Algorithm 4 uses "Rank Score".
+            
+            # Let's map word-level difficulty:
+            word_scores = []
+            
+            # This alignment is tricky. We'll simplify: 
+            # We will tokenize each word individually to map back to input_ids
+            # This is an approximation.
+            
+            current_token_idx = 0
+            for i, word in enumerate(words):
+                w_tokens = self.tokenizer.tokenize(" " + word) # GPT2 adds space
+                w_len = len(w_tokens)
+                
+                if current_token_idx + w_len >= len(input_ids): break
+                
+                # Calculate avg NLL for this word's tokens
+                # Score is sum of log probs (lower is harder? No, Rank Score. High Rank = Low Prob)
+                # We use CrossEntropy (Loss) as proxy for difficulty. Higher loss = Harder.
+                
+                start = current_token_idx
+                end = current_token_idx + w_len
+                
+                # Shift by -1 for logits
+                # Loss for token at pos `t` uses logits at `t-1` and label at `t`
+                
+                word_loss = 0.0
+                valid_tokens = 0
+                for t in range(start, end):
+                    if t == 0: continue # Can't predict first token
+                    token_id = input_ids[t]
+                    token_logits = logits[t-1]
+                    loss = torch.nn.functional.cross_entropy(token_logits.view(1, -1), token_id.view(1))
+                    word_loss += loss.item()
+                    valid_tokens += 1
+                
+                avg_loss = word_loss / max(1, valid_tokens)
+                
+                if self.is_valid_word(word):
+                    word_scores.append((i, avg_loss))
+                
+                current_token_idx += w_len
+                
+            # Sort by difficulty (Loss descending)
+            word_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            selected_indices = []
+            # Adjacency Filter
+            for idx, score in word_scores:
+                if len(selected_indices) >= num_masks: break
+                
+                # Check neighbors
+                is_adjacent = False
+                for existing in selected_indices:
+                    if abs(existing - idx) <= 1:
+                        is_adjacent = True
+                        break
+                
+                if not is_adjacent:
+                    selected_indices.append(idx)
+
+        # Apply Masks
+        selected_indices.sort()
+        masked_words = words.copy()
         ground_truth = {}
         
-        token_strs = [self.tokenizer.decode([t]) for t in masked_tokens]
-        
-        # Sort indices descending so we can process without affecting earlier indices logic?
-        # Actually we operate on list so index is stable until we modify list structure.
-        # But here we just replace string in list.
-        
-        for i, idx in enumerate(top_k_indices):
-            if idx < len(token_strs):
-                original = token_strs[idx]
-                token_strs[idx] = f" [MASK_{i+1}]"
-                ground_truth[f"[MASK_{i+1}]"] = original.strip()
+        for i, idx in enumerate(selected_indices):
+            original_word = words[idx]
             
-        masked_text = "".join(token_strs)
-        return masked_text, ground_truth
+            # Spelling Correction (Algorithm 1)
+            answers = [original_word]
+            if self.use_spelling:
+                # Get context
+                start_ctx = max(0, idx - 2)
+                context_chunk = " ".join(words[start_ctx : idx + 1])
+                corrected = self.correct_spelling(context_chunk).split()[-1] # Take last word
+                
+                # Clean punctuation on corrected
+                corrected_clean = re.sub(r'[^\w]', '', corrected)
+                original_clean = re.sub(r'[^\w]', '', original_word)
+                
+                if corrected_clean.lower() != original_clean.lower() and len(corrected_clean) > 0:
+                    answers.append(corrected_clean)
+            
+            mask_token = f"[MASK_{i+1}]"
+            masked_words[idx] = mask_token
+            ground_truth[mask_token] = answers
+            
+        return " ".join(masked_words), ground_truth
 
-# --- Step 3: RAG System ---
+# --- 3. RAG System ---
 class RAGSystem:
-    def __init__(self, config: MIAConfig, member_texts: List[str]):
+    def __init__(self, config: MIAConfig, documents: List[Document]):
         self.config = config
-        print(f"Initializing RAG with LLM={config.llm_model} and Embed={config.embedding_model}")
         
-        self.embeddings = HuggingFaceEmbeddings(model_name=config.embedding_model)
-        
-        print("Building Vector Store...")
-        if config.retriever_type == "bm25":
-            if BM25Retriever is None:
-                raise ImportError("BM25Retriever not found. Please install rank_bm25: pip install rank_bm25")
-            print("Building BM25 Retriever...")
-            self.retriever = BM25Retriever.from_texts(member_texts)
-            self.retriever.k = config.top_k_retrieval
-        elif config.retriever_type == "faiss":
-            self.vector_store = FAISS.from_texts(member_texts, self.embeddings)
-            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.top_k_retrieval})
-        else:
-            print(f"Warning: Unknown retriever type '{config.retriever_type}'. Defaulting to FAISS.")
-            self.vector_store = FAISS.from_texts(member_texts, self.embeddings)
-            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.top_k_retrieval})
-
-        
-        
-        # Ensure model is available
-        ensure_ollama_model(config.llm_model)
-        
-        self.llm = OllamaClass(model=config.llm_model, temperature=0, num_predict=50) # Low temp, limit output
-        
-        template = """You are a helpful assistant. Use the following pieces of context to fill in the missing [MASK_N] placeholders in the text.
-        
-        Context:
-        {context}
-        
-        Please provide the original words for the placeholders in the format:
-        [MASK_1]: answer
-        [MASK_2]: answer
-        
-        Text to fill:
-        {question}
-        """
-        self.qa_prompt = PromptTemplate(template=template, input_variables=["context", "question"])
-        self.qa_chain = RetrievalQA.from_chain_type(
-            llm=self.llm,
-            chain_type="stuff",
-            retriever=self.retriever,
-            chain_type_kwargs={"prompt": self.qa_prompt}
+        print("Initializing RAG Embeddings (Strict Truncation)...")
+        # CRITICAL FIX: encode_kwargs={'max_length': 512, 'truncation': True}
+        # This prevents the CUDA assert error on long docs
+        self.embeddings = HuggingFaceEmbeddings(
+            model_name=config.embedding_model,
+            encode_kwargs={'normalize_embeddings': True},
+            model_kwargs={'device': 'cuda' if torch.cuda.is_available() else 'cpu'}
         )
+        # Ensure underlying SentenceTransformer respects simple truncation if possible
+        # but LangChain wrap helps. We forced input text truncation in `load_real_dataset` too.
+        
+        if config.retriever_type == "bm25":
+            print("Using BM25 Retriever")
+            try:
+                from langchain_community.retrievers import BM25Retriever
+                self.retriever = BM25Retriever.from_documents(documents)
+                self.retriever.k = config.top_k_retrieval
+                self.vector_store = None
+            except ImportError:
+                print("Error: rank_bm25 not installed. Install with `pip install rank_bm25`")
+                raise
+        else:
+            print(f"Building FAISS Index with {len(documents)} documents...")
+            self.vector_store = FAISS.from_documents(documents, self.embeddings)
+            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.top_k_retrieval})
+        
+        print(f"Initializing LLM: {config.llm_model}")
+        self.llm = OllamaLLM(model=config.llm_model, temperature=0.0)
 
-    def query(self, masked_text: str) -> str:
-        return self.qa_chain.invoke(masked_text)['result']
+    def query(self, masked_text: str) -> Tuple[str, List[int]]:
+        """
+        Returns: (Generated Answer, List of Retrieved Doc IDs)
+        """
+        # Retrieval
+        docs = self.retriever.invoke(masked_text)
+        retrieved_ids = [d.metadata.get('id', -1) for d in docs]
+        
+        # Generation
+        context_str = "\n\n".join([d.page_content for d in docs])
+        
+        # Phi-3 Specific Prompt (One-Shot)
+        if "phi" in self.config.llm_model.lower():
+            prompt = f"""Instruct: You are a helpful assistant. Below is a text with missing words marked as [MASK_N]. Use the provided Context to identify the missing words.
+            
+            Context: {context_str[:2000]}...
+            
+            Input Text: {masked_text}
+            
+            Format your output strictly as:
+            [MASK_1]: <word>
+            [MASK_2]: <word>
+            
+            Output:
+            """
+        else:
+            # Standard Prompt
+            prompt = f"""You are a helper. The following text contains masked words like [MASK_1]. Using the context provided, identify the original words.
+            
+            Context:
+            {context_str}
+            
+            Text with Masks:
+            {masked_text}
+            
+            Please list the answers for each mask. Format:
+            [MASK_1]: answer_word
+            [MASK_2]: answer_word
+            """
+            
+        response = self.llm.invoke(prompt)
+        return response, retrieved_ids
 
-# --- Step 4 & 5: Attack & Evaluation ---
+# --- 4. Main Attack Logic ---
 class MIAAttacker:
     def __init__(self, config: MIAConfig):
         self.config = config
-        self.proxy = ProxyModel(model_name=config.proxy_model)
-    
-    def evaluate_response(self, response: str, ground_truth: Dict[str, str]) -> float:
-        """
-        Calculates accuracy of RAG response against ground truth.
-        """
-        correct_count = 0
-        total_masks = len(ground_truth)
+        self.mask_generator = MaskGenerator(
+            model_name=config.proxy_model, 
+            use_spelling=config.use_spelling_correction
+        )
         
-        if total_masks == 0:
-            return 0.0
-            
-        # Parse response. Expecting "[MASK_N]: answer"
-        # We'll normalize text to lowercase and remove punctuation for comparison
+    def evaluate_correctness(self, response: str, ground_truth: Dict[str, List[str]]) -> float:
+        if not ground_truth: return 0.0
+        
+        correct = 0
         response_lower = response.lower()
         
-        for mask_key, answer in ground_truth.items():
-            answer_clean = answer.lower().strip()
-            # Check if answer is associated with mask key in response
-            # Heuristic: Find mask key line, check if answer is in it
-            # Or just check if answer appears near mask key
+        for mask_key, valid_answers in ground_truth.items():
+            # Clean valid answers
+            valid_answers_clean = [a.lower().strip() for a in valid_answers]
             
-            # Simple parsing:
-            # Pattern: \[MASK_\d+\]:?\s*(.*)
-            # But let's act robustly: search for mask key and see if answer follows
+            # Find line with mask key
+            # Regex to find "[MASK_1]: word"
+            # escape brackets for regex
+            key_esc = re.escape(mask_key).lower()
+            # Fix warning by using raw string for regex
+            match = re.search(fr"{key_esc}[:\s]+(.*?)(?:\n|$)", response_lower)
             
-            if mask_key.lower() in response_lower:
-                # Extract segment after mask key
-                part = response_lower.split(mask_key.lower())[1]
-                # Take first line or reasonable chunk
-                line = part.split('\n')[0]
-                if answer_clean in line:
-                    correct_count += 1
-        
-        return correct_count / total_masks
+            if match:
+                predicted_raw = match.group(1)
+                # Check if any valid answer is in predicted string
+                # Logic: Is the predicted word ONE of the valid answers?
+                # We split predicted by space to handle "word." punctuation issues
+                pred_words = re.split(r'\W+', predicted_raw)
+                
+                is_hit = False
+                for ans in valid_answers_clean:
+                    if ans in pred_words or ans in predicted_raw:
+                        is_hit = True
+                        break
+                if is_hit:
+                    correct += 1
+                    
+        return correct / len(ground_truth)
 
-    def run_attack(self, rag_system: RAGSystem, documents: List[str], is_member: bool) -> List[Dict]:
+    def run_experiment(self, rag: RAGSystem, target_docs: List[Document], is_member: bool):
         results = []
         label = 1 if is_member else 0
+        desc = "Members" if is_member else "Non-Members"
         
-        print(f"Running attack on {'Members' if is_member else 'Non-Members'}...")
-        for doc in tqdm(documents):
-            # 1. Generate Masks
-            masked_text, ground_truth = self.proxy.rank_words(doc, num_masks=self.config.num_masks)
+        for doc in tqdm(target_docs, desc=desc):
+            # 1. Masking
+            masked_text, ground_truth = self.mask_generator.generate_masks(
+                doc.page_content, 
+                num_masks=self.config.num_masks, 
+                strategy=self.config.masking_strategy
+            )
             
-            # 2. Query RAG
+            if not ground_truth: continue # skipped short doc
+            
+            # 2. Query
             try:
-                response = rag_system.query(masked_text)
+                response, retrieved_ids = rag.query(masked_text)
                 
-                # 3. Score
-                accuracy = self.evaluate_response(response, ground_truth)
+                # 3. Metrics
+                mask_acc = self.evaluate_correctness(response, ground_truth)
+                
+                # Retrieval Recall (Only relevant for Members)
+                retrieval_hit = False
+                if is_member:
+                    doc_id = doc.metadata.get('id')
+                    if doc_id in retrieved_ids:
+                        retrieval_hit = True
                 
                 results.append({
-                    "text_preview": doc[:30],
                     "is_member": label,
-                    "accuracy": accuracy,
-                    "ground_truth": ground_truth,
-                    "response_preview": response[:50]
+                    "mask_acc": mask_acc,
+                    "retrieval_recall": 1.0 if retrieval_hit else 0.0,
+                    "ground_truth": str(ground_truth),
+                    "response_len": len(response)
                 })
+                
             except Exception as e:
-                print(f"  Error querying RAG: {e}")
-                results.append({
-                    "text_preview": doc[:30],
-                    "is_member": label,
-                    "accuracy": 0.0,
-                    "error": str(e)
-                })
+                print(f"Error processing doc: {e}")
                 
         return results
 
-def plot_roc_curve(y_true, y_scores, title="ROC Curve"):
-    if len(y_true) == 0:
-        print("Error: No results to plot (y_true is empty).")
-        return 0.0
-        
-    unique_labels = set(y_true)
-    if len(unique_labels) < 2:
-        print(f"Warning: Only one class present in results {unique_labels}. Cannot compute ROC AUC.")
-        return 0.5
-
-    try:
-        fpr, tpr, _ = roc_curve(y_true, y_scores)
-        roc_auc = auc(fpr, tpr)
-        
-        plt.figure()
-        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (area = {roc_auc:.2f})')
-        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-        plt.xlim([0.0, 1.0])
-        plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title(title)
-        plt.legend(loc="lower right")
-        plt.show() 
-        
-        print(f"AUC Score: {roc_auc:.4f}")
-        return roc_auc
-    except Exception as e:
-        print(f"Error plotting ROC curve: {e}")
-        return 0.0
-
-def calculate_metrics(y_true, y_scores):
-    """
-    Calculates detailed metrics including Accuracy, Precision, Recall, F1, 
-    and checks for the optimal threshold using Youden's J statistic.
-    """
-    fpr, tpr, thresholds = roc_curve(y_true, y_scores)
-    
-    # Avoid division by zero if simple case
-    if len(thresholds) == 0:
-        return {}
-
-    # Optimal threshold (Maximize TPR - FPR)
-    J = tpr - fpr
-    ix = np.argmax(J)
-    best_thresh = thresholds[ix]
-    
-    # Binarize predictions based on best threshold
-    y_pred = [1 if score >= best_thresh else 0 for score in y_scores]
-    
-    # Calculate metrics
-    acc = accuracy_score(y_true, y_pred)
-    prec = precision_score(y_true, y_pred, zero_division=0)
-    rec = recall_score(y_true, y_pred, zero_division=0)
-    f1 = f1_score(y_true, y_pred, zero_division=0)
-    tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
-    
-    metrics = {
-        "AUC": auc(fpr, tpr),
-        "Best Threshold": best_thresh,
-        "Accuracy": acc,
-        "Precision": prec,
-        "Recall": rec,
-        "F1 Score": f1,
-        "TP": tp, "TN": tn, "FP": fp, "FN": fn
-    }
-    
-    print("\n--- Detailed Evaluation Metrics (at optimal threshold) ---")
-    for k, v in metrics.items():
-        if isinstance(v, float):
-            print(f"{k}: {v:.4f}")
-        else:
-            print(f"{k}: {v}")
-            
-    return metrics
-
-def log_results_to_markdown(config: MIAConfig, metrics: Dict, filename="experiment_results.md"):
-    """Appends experiment results to a markdown file."""
-    
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    md_content = f"""
-## Experiment Run: {timestamp}
-
-### Configuration
-- **LLM**: `{config.llm_model}`
-- **Embedding**: `{config.embedding_model}`
-- **Dataset**: `{config.dataset_type}`
-- **Masks per Doc**: {config.num_masks}
-- **Retriever**: `{config.retriever_type}`
-
-### Results
-| Metric | Value |
-|--------|-------|
-| **AUC** | **{metrics.get('AUC', 0):.4f}** |
-| Accuracy | {metrics.get('Accuracy', 0):.4f} |
-| Precision | {metrics.get('Precision', 0):.4f} |
-| Recall | {metrics.get('Recall', 0):.4f} |
-| F1 Score | {metrics.get('F1 Score', 0):.4f} |
-| Best Threshold | {metrics.get('Best Threshold', 0):.4f} |
-
-**Confusion Matrix:**
-- True Positives (Member detected as Member): {metrics.get('TP', 0)}
-- True Negatives (Non-Member detected as Non-Member): {metrics.get('TN', 0)}
-- False Positives (Non-Member detected as Member): {metrics.get('FP', 0)}
-- False Negatives (Member detected as Non-Member): {metrics.get('FN', 0)}
-
----
-"""
-    try:
-        with open(filename, "a", encoding="utf-8") as f:
-            f.write(md_content)
-        print(f"\nResults successfully appended to {filename}")
-    except Exception as e:
-        print(f"Failed to log results to markdown: {e}")
-
-# --- Main Execution Loop ---
-def run_experiment(config: MIAConfig):
-    print(f"\n--- Starting Experiment: {config} ---")
-    
-    # 1. Prepare Data
-    # 1. Prepare Data
-    # Increased sample size for better stats with real data
-    data = load_real_dataset(config.dataset_type, sample_size=40) 
-    members, non_members = prepare_datasets(data)
-    
-    # 2. Setup RAG
-    rag = RAGSystem(config, members)
-    
-    # 3. Setup Attacker
-    attacker = MIAAttacker(config)
-    
-    # 4. Run Attack
-    results_member = attacker.run_attack(rag, members, is_member=True)
-    results_non_member = attacker.run_attack(rag, non_members, is_member=False)
-    
-    # 5. Evaluate
-    all_results = results_member + results_non_member
-    y_true = [r['is_member'] for r in all_results]
-    y_scores = [r['accuracy'] for r in all_results]
-    
-    # Plot ROC
-    # plot_roc_curve(y_true, y_scores, title=f"ROC - {config.llm_model} - {config.dataset_type}")
-    
-    # Calculate Detailed Metrics
-    metrics = calculate_metrics(y_true, y_scores)
-    
-    # Log to Markdown
-    log_results_to_markdown(config, metrics)
-    
-    return all_results, metrics
-
+# --- Main ---
+# --- Main ---
 if __name__ == "__main__":
-    # Framework for Ablation Studies & Variations
-    print("--- Starting Ablation Studies ---")
+    print("--- Starting Ablation Studies (MBA Implementation) ---")
     
-    # Configuration Matrix
-    llm_options = ["llama3", "mistral", "phi3"]
-    embedding_options = ["sentence-transformers/all-MiniLM-L6-v2", "BAAI/bge-small-en-v1.5"]
-    retriever_options = ["faiss", "bm25"]
-    dataset_options = ["general", "medical", "legal"]
-    
-    # Iterate through all combinations
-    total_runs = len(llm_options) * len(embedding_options) * len(retriever_options) * len(dataset_options)
-    current_run = 0
-    
-    for llm in llm_options:
-        for embed in embedding_options:
-            for ret in retriever_options:
-                for data_type in dataset_options:
-                    current_run += 1
-                    print(f"\n[{current_run}/{total_runs}] Running Configuration: LLM={llm}, Embed={embed}, Ret={ret}, Data={data_type}")
-                    
-                    config = MIAConfig(
-                        llm_model=llm,
-                        embedding_model=embed,
-                        retriever_type=ret,
-                        dataset_type=data_type,
-                        num_masks=5,  # Fixed as per rigorous eval
-                        top_k_retrieval=3
-                    )
-                    
+    # Ablation Configuration
+    datasets = ["healthcaremagic", "msmarco", "nq"]
+    llms = ["llama3", "mistral", "phi3"]
+    embeddings = ["sentence-transformers/all-MiniLM-L6-v2", "BAAI/bge-small-en-v1.5"]
+    retrievers = ["faiss", "bm25"]
+
+    for d_type in datasets:
+        for model in llms:
+            for emb in embeddings:
+                for ret in retrievers:
                     try:
-                        results, metrics = run_experiment(config)
-                        # Optional: Clear CUDA cache if using GPU to prevent OOM
+                        print(f"\n\n==================================================")
+                        print(f"Running Experiment: Dataset={d_type}, LLM={model}, Embed={emb}, Ret={ret}")
+                        print(f"==================================================")
+                        
+                        # 1. Pipeline Setup
+                        start_time = datetime.now()
+                        
+                        # Config
+                        config = MIAConfig(
+                            llm_model=model,
+                            embedding_model=emb,
+                            dataset_type=d_type,
+                            masking_strategy="hard",
+                            num_masks=5,
+                            retriever_type=ret,
+                            index_size=500, # Large haystack
+                            eval_size=50    # Quick eval
+                        )
+                        
+                        # 2. Data
+                        # Load enough documents for the Index
+                        documents = load_real_dataset(config.dataset_type, sample_size=config.index_size)
+                        if not documents:
+                            print("Skipping due to empty dataset.")
+                            continue
+                            
+                        # Split: 80% Members (Indexed), 20% Non-Members (Not Indexed)
+                        members, non_members = prepare_splits(documents, split_ratio=0.8)
+                        
+                        # 3. Build RAG
+                        # Index ALL Members to create the "Haystack"
+                        print(f"Indexing {len(members)} Member documents...")
+                        rag = RAGSystem(config, members)
+                        
+                        # 4. Attack
+                        attacker = MIAAttacker(config)
+                        
+                        # Sub-sample for Evaluation
+                        # We only attack 'eval_size' documents to save time, but they are hidden among all 'members'
+                        eval_members = random.sample(members, min(len(members), config.eval_size))
+                        eval_non_members = random.sample(non_members, min(len(non_members), config.eval_size))
+                        
+                        print(f"\n--- Attacking {len(eval_members)} Member Documents (from {len(members)} indexed) ---")
+                        member_results = attacker.run_experiment(rag, eval_members, is_member=True)
+                        
+                        print(f"\n--- Attacking {len(eval_non_members)} Non-Member Documents ---")
+                        non_member_results = attacker.run_experiment(rag, eval_non_members, is_member=False)
+                        
+                        # 5. Evaluation & Logging
+                        all_results = member_results + non_member_results
+                        if not all_results:
+                            print("No results generated.")
+                            continue
+                            
+                        y_true = [r['is_member'] for r in all_results]
+                        y_scores = [r['mask_acc'] for r in all_results]
+                        
+                        retrieval_recalls = [r['retrieval_recall'] for r in member_results]
+                        avg_recall = sum(retrieval_recalls) / len(retrieval_recalls) if retrieval_recalls else 0.0
+                        
+                        auc_score = 0
+                        if len(set(y_true)) > 1:
+                            auc_score = roc_auc_score(y_true, y_scores)
+                            
+                        print(f"AUC: {auc_score:.4f}, Recall: {avg_recall:.4f}")
+                        
+                        # Log to MD
+                        with open("experiment_results.md", "a") as f:
+                            f.write(f"\n## Run {start_time}\n")
+                            f.write(f"- **Config**: {config}\n") # Using repr for details
+                            f.write(f"- **AUC**: {auc_score:.4f}\n")
+                            f.write(f"- **Retrieval Recall**: {avg_recall:.4f}\n")
+                            f.write(f"- **Index Size**: {len(members)}\n")
+                            f.write(f"- **Eval Samples**: {len(all_results)} (M:{len(member_results)}, NM:{len(non_member_results)})\n")
+                            f.write("---\n")
+                            
+                        # Clean up
+                        del rag
+                        del attacker
                         if torch.cuda.is_available():
                             torch.cuda.empty_cache()
                             
                     except Exception as e:
-                        print(f"!!! Run Failed for {config}: {e}")
-                        # Log failure explicitly
-                        try:
-                            with open("experiment_failures.log", "a") as f:
-                                f.write(f"Failed Config: {config}\nError: {e}\n\n")
-                        except:
-                            pass
-                            
-    print("\n--- Ablation Studies Framework Completed ---")
+                        print(f"FAILED Experiment {d_type}/{model}: {e}")
+                        with open("experiment_results.md", "a") as f:
+                             f.write(f"\n## Run {datetime.now()} - FAILED\n")
+                             f.write(f"- **Config**: {d_type}, {model}, {emb}, {ret}\n")
+                             f.write(f"- **Error**: {e}\n")
+                             f.write("---\n")
 
-
+    print("\n--- All Ablation Studies Completed ---")

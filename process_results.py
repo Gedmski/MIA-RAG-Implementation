@@ -10,43 +10,37 @@ def parse_experiment_results(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    # Split by experiment runs
-    experiments = content.split('## Experiment Run: ')
+    # Split by experiment runs (## Run ...)
+    experiments = re.split(r'## Run ', content)
     data = []
 
     for exp in experiments:
         if not exp.strip():
             continue
 
-        # Extract timestamp
+        # Extract timestamp (it's right after ## Run )
+        # The split removes "## Run ", so the first chars are the timestamp
         timestamp_match = re.match(r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})', exp)
         timestamp = timestamp_match.group(1) if timestamp_match else "Unknown"
 
-        # Extract Configuration
-        llm = re.search(r'- \*\*LLM\*\*: `(.*?)`', exp)
-        embedding = re.search(r'- \*\*Embedding\*\*: `(.*?)`', exp)
-        dataset = re.search(r'- \*\*Dataset\*\*: `(.*?)`', exp)
-        retriever = re.search(r'- \*\*Retriever\*\*: `(.*?)`', exp)
-
-        # Extract Metrics
-        auc = re.search(r'\| \*\*AUC\*\* \| \*\*(.*?)\*\* \|', exp)
-        accuracy = re.search(r'\| Accuracy \| (.*?) \|', exp)
-        precision = re.search(r'\| Precision \| (.*?) \|', exp)
-        recall = re.search(r'\| Recall \| (.*?) \|', exp)
-        f1 = re.search(r'\| F1 Score \| (.*?) \|', exp)
-
-        if llm and auc:
+        # Extract Configuration from: - **Config**: Config(LLM=..., Data=..., Emb=..., Ret=..., Idx=..., Eval=...)
+        config_match = re.search(r'- \*\*Config\*\*: Config\(LLM=(.*?), Data=(.*?), Emb=(.*?), Ret=(.*?), Idx=(.*?), Eval=(.*?)\)', exp)
+        
+        # metrics
+        auc_match = re.search(r'- \*\*AUC\*\*: ([\d\.]+)', exp)
+        recall_match = re.search(r'- \*\*Retrieval Recall\*\*: ([\d\.]+)', exp)
+        
+        if config_match and auc_match:
             data.append({
                 'Timestamp': timestamp,
-                'LLM': llm.group(1),
-                'Embedding': embedding.group(1) if embedding else "Unknown",
-                'Dataset': dataset.group(1) if dataset else "Unknown",
-                'Retriever': retriever.group(1) if retriever else "Unknown",
-                'AUC': float(auc.group(1)),
-                'Accuracy': float(accuracy.group(1)) if accuracy else 0.0,
-                'Precision': float(precision.group(1)) if precision else 0.0,
-                'Recall': float(recall.group(1)) if recall else 0.0,
-                'F1 Score': float(f1.group(1)) if f1 else 0.0
+                'LLM': config_match.group(1),
+                'Dataset': config_match.group(2),
+                'Embedding': config_match.group(3),
+                'Retriever': config_match.group(4),
+                'Index Size': config_match.group(5),
+                'Eval Samples': config_match.group(6),
+                'AUC': float(auc_match.group(1)),
+                'Retrieval Recall': float(recall_match.group(1)) if recall_match else 0.0
             })
     
     return pd.DataFrame(data)
@@ -88,28 +82,28 @@ def generate_report(df, output_path):
 
     # 2. Performance by LLM
     report_content += "## 2. Performance by LLM\n\n"
-    llm_stats = df.groupby('LLM')[['AUC', 'Accuracy']].mean().reset_index().sort_values(by='AUC', ascending=False)
+    llm_stats = df.groupby('LLM')[['AUC', 'Retrieval Recall']].mean().reset_index().sort_values(by='AUC', ascending=False)
     report_content += to_markdown_table(llm_stats) + "\n\n"
 
-    # 3. Performance by Emebdding
+    # 3. Performance by Embedding Model
     report_content += "## 3. Performance by Embedding Model\n\n"
-    emb_stats = df.groupby('Embedding')[['AUC', 'Accuracy']].mean().reset_index().sort_values(by='AUC', ascending=False)
+    emb_stats = df.groupby('Embedding')[['AUC', 'Retrieval Recall']].mean().reset_index().sort_values(by='AUC', ascending=False)
     report_content += to_markdown_table(emb_stats) + "\n\n"
 
     # 4. Performance by Retriever
     report_content += "## 4. Performance by Retriever\n\n"
-    ret_stats = df.groupby('Retriever')[['AUC', 'Accuracy']].mean().reset_index().sort_values(by='AUC', ascending=False)
+    ret_stats = df.groupby('Retriever')[['AUC', 'Retrieval Recall']].mean().reset_index().sort_values(by='AUC', ascending=False)
     report_content += to_markdown_table(ret_stats) + "\n\n"
 
     # 5. Dataset Difficulty
     report_content += "## 5. Dataset Difficulty (Average AUC)\n\n"
-    data_stats = df.groupby('Dataset')[['AUC', 'Accuracy']].mean().reset_index().sort_values(by='AUC', ascending=True)
+    data_stats = df.groupby('Dataset')[['AUC', 'Retrieval Recall']].mean().reset_index().sort_values(by='AUC', ascending=True)
     report_content += to_markdown_table(data_stats) + "\n\n"
 
     # 6. Full Data Table
     report_content += "## 6. All Experiment Runs\n\n"
     # Select key columns for cleaner table
-    display_df = df[['Timestamp', 'LLM', 'Embedding', 'Dataset', 'Retriever', 'AUC', 'Accuracy']]
+    display_df = df[['Timestamp', 'LLM', 'Embedding', 'Dataset', 'Retriever', 'AUC', 'Retrieval Recall']]
     report_content += to_markdown_table(display_df.sort_values(by='AUC', ascending=False))
     
     with open(output_path, 'w', encoding='utf-8') as f:
@@ -118,10 +112,12 @@ def generate_report(df, output_path):
     print(f"Report generated at {output_path}")
 
 def main():
+    print("Starting process_results.py...")
     if not os.path.exists(EXPERIMENT_FILE):
         print(f"Error: {EXPERIMENT_FILE} not found.")
         return
 
+    print(f"Parsing {EXPERIMENT_FILE}...")
     df = parse_experiment_results(EXPERIMENT_FILE)
     
     if df.empty:
@@ -133,7 +129,9 @@ def main():
     print(f"Extracted {len(df)} runs to {CSV_FILE}")
 
     # Generate Report
+    print(f"Generating report to {REPORT_FILE}...")
     generate_report(df, REPORT_FILE)
+    print("Done.")
 
 if __name__ == "__main__":
     main()

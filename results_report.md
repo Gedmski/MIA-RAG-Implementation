@@ -6,76 +6,76 @@ The highest AUC achieving configuration was:
 - **LLM**: `llama3`
 - **Embedding**: `sentence-transformers/all-MiniLM-L6-v2`
 - **Retriever**: `faiss`
-- **Dataset**: `general`
-- **AUC**: **1.0000**
+- **Dataset**: `healthcaremagic`
+- **AUC**: **0.9946**
 
 ## 2. Performance by LLM
 
-| LLM     |      AUC |
-|:--------|---------:|
-| llama3  | 0.987142 |
-| mistral | 0.932292 |
-| phi3    | 0.737475 |
+| LLM | AUC | Retrieval Recall |
+| --- | --- | --- |
+| llama3 | 0.9434 | 1.0000 |
+| mistral | 0.7833 | 1.0000 |
+| phi3 | 0.7117 | 1.0000 |
 
 ## 3. Performance by Embedding Model
 
-| Embedding                              |      AUC |
-|:---------------------------------------|---------:|
-| BAAI/bge-small-en-v1.5                 | 0.889761 |
-| sentence-transformers/all-MiniLM-L6-v2 | 0.881511 |
+| Embedding | AUC | Retrieval Recall |
+| --- | --- | --- |
+| sentence-transformers/all-MiniLM-L6-v2 | 0.8486 | 1.0000 |
+| BAAI/bge-small-en-v1.5 | 0.7770 | 1.0000 |
 
 ## 4. Performance by Retriever
 
-| Retriever   |      AUC |
-|:------------|---------:|
-| bm25        | 0.888456 |
-| faiss       | 0.882817 |
+| Retriever | AUC | Retrieval Recall |
+| --- | --- | --- |
+| faiss | 0.8376 | 1.0000 |
+| bm25 | 0.7880 | 1.0000 |
 
 ## 5. Dataset Difficulty (Average AUC)
 
-| Dataset   |      AUC |
-|:----------|---------:|
-| general   | 0.847667 |
-| legal     | 0.855625 |
-| medical   | 0.953617 |
+| Dataset | AUC | Retrieval Recall |
+| --- | --- | --- |
+| nq | 0.7929 | 1.0000 |
+| healthcaremagic | 0.8135 | 1.0000 |
+| msmarco | 0.8319 | 1.0000 |
 
 ## 6. All Experiment Runs
 
-| Timestamp           | LLM     | Embedding                              | Dataset   | Retriever   |    AUC |   Accuracy |   Precision |   Recall |   F1 Score |
-|:--------------------|:--------|:---------------------------------------|:----------|:------------|-------:|-----------:|------------:|---------:|-----------:|
-| 2026-01-12 23:24:19 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | general   | faiss       | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-12 23:32:13 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | general   | bm25        | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-12 23:59:17 | mistral | sentence-transformers/all-MiniLM-L6-v2 | medical   | faiss       | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-12 23:48:06 | llama3  | BAAI/bge-small-en-v1.5                 | general   | bm25        | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-13 00:07:50 | mistral | sentence-transformers/all-MiniLM-L6-v2 | medical   | bm25        | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-13 00:24:59 | mistral | BAAI/bge-small-en-v1.5                 | medical   | bm25        | 1      |      1     |      1      |   1      |     1      |
-| 2026-01-12 23:50:42 | llama3  | BAAI/bge-small-en-v1.5                 | medical   | bm25        | 0.9961 |      0.95  |      1      |   0.9375 |     0.9677 |
-| 2026-01-12 23:26:54 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | medical   | faiss       | 0.9961 |      0.95  |      1      |   0.9375 |     0.9677 |
-| 2026-01-12 23:34:47 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | medical   | bm25        | 0.9961 |      0.95  |      1      |   0.9375 |     0.9677 |
-| 2026-01-12 23:42:40 | llama3  | BAAI/bge-small-en-v1.5                 | medical   | faiss       | 0.9961 |      0.95  |      1      |   0.9375 |     0.9677 |
-| 2026-01-12 23:56:23 | mistral | sentence-transformers/all-MiniLM-L6-v2 | general   | faiss       | 0.9902 |      0.975 |      0.9697 |   1      |     0.9846 |
-| 2026-01-12 23:37:40 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | legal     | bm25        | 0.9863 |      0.975 |      1      |   0.9688 |     0.9841 |
-| 2026-01-12 23:53:44 | llama3  | BAAI/bge-small-en-v1.5                 | legal     | bm25        | 0.9863 |      0.975 |      1      |   0.9688 |     0.9841 |
-| 2026-01-12 23:29:49 | llama3  | sentence-transformers/all-MiniLM-L6-v2 | legal     | faiss       | 0.9746 |      0.95  |      0.9688 |   0.9688 |     0.9688 |
-| 2026-01-13 00:16:18 | mistral | BAAI/bge-small-en-v1.5                 | medical   | faiss       | 0.9707 |      0.875 |      1      |   0.8438 |     0.9153 |
-| 2026-01-13 00:04:55 | mistral | sentence-transformers/all-MiniLM-L6-v2 | general   | bm25        | 0.9707 |      0.875 |      1      |   0.8438 |     0.9153 |
-| 2026-01-13 00:22:07 | mistral | BAAI/bge-small-en-v1.5                 | general   | bm25        | 0.9707 |      0.875 |      1      |   0.8438 |     0.9153 |
-| 2026-01-12 23:40:06 | llama3  | BAAI/bge-small-en-v1.5                 | general   | faiss       | 0.9688 |      0.8   |      1      |   0.75   |     0.8571 |
-| 2026-01-13 00:13:26 | mistral | BAAI/bge-small-en-v1.5                 | general   | faiss       | 0.959  |      0.85  |      1      |   0.8125 |     0.8966 |
-| 2026-01-12 23:45:41 | llama3  | BAAI/bge-small-en-v1.5                 | legal     | faiss       | 0.9453 |      0.825 |      1      |   0.7812 |     0.8772 |
-| 2026-01-13 00:49:05 | phi3    | BAAI/bge-small-en-v1.5                 | medical   | faiss       | 0.9043 |      0.875 |      1      |   0.8438 |     0.9153 |
-| 2026-01-13 00:42:12 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | medical   | bm25        | 0.8672 |      0.775 |      0.96   |   0.75   |     0.8421 |
-| 2026-01-13 00:56:02 | phi3    | BAAI/bge-small-en-v1.5                 | medical   | bm25        | 0.8672 |      0.775 |      0.96   |   0.75   |     0.8421 |
-| 2026-01-13 00:35:21 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | medical   | faiss       | 0.8496 |      0.75  |      0.9583 |   0.7188 |     0.8214 |
-| 2026-01-13 00:28:17 | mistral | BAAI/bge-small-en-v1.5                 | legal     | bm25        | 0.8457 |      0.625 |      1      |   0.5312 |     0.6939 |
-| 2026-01-13 00:10:53 | mistral | sentence-transformers/all-MiniLM-L6-v2 | legal     | bm25        | 0.8457 |      0.625 |      1      |   0.5312 |     0.6939 |
-| 2026-01-13 00:19:33 | mistral | BAAI/bge-small-en-v1.5                 | legal     | faiss       | 0.8438 |      0.725 |      1      |   0.6562 |     0.7925 |
-| 2026-01-13 00:51:39 | phi3    | BAAI/bge-small-en-v1.5                 | legal     | faiss       | 0.8066 |      0.65  |      0.95   |   0.5938 |     0.7308 |
-| 2026-01-13 00:02:20 | mistral | sentence-transformers/all-MiniLM-L6-v2 | legal     | faiss       | 0.791  |      0.675 |      1      |   0.5938 |     0.7451 |
-| 2026-01-13 00:58:32 | phi3    | BAAI/bge-small-en-v1.5                 | legal     | bm25        | 0.7578 |      0.7   |      1      |   0.625  |     0.7692 |
-| 2026-01-13 00:44:41 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | legal     | bm25        | 0.7578 |      0.7   |      1      |   0.625  |     0.7692 |
-| 2026-01-13 00:37:49 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | legal     | faiss       | 0.7266 |      0.625 |      0.9474 |   0.5625 |     0.7059 |
-| 2026-01-13 00:46:48 | phi3    | BAAI/bge-small-en-v1.5                 | general   | faiss       | 0.625  |      0.475 |      0.9231 |   0.375  |     0.5333 |
-| 2026-01-13 00:39:56 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | general   | bm25        | 0.5723 |      0.45  |      0.8571 |   0.375  |     0.5217 |
-| 2026-01-13 00:53:45 | phi3    | BAAI/bge-small-en-v1.5                 | general   | bm25        | 0.5723 |      0.45  |      0.8571 |   0.375  |     0.5217 |
-| 2026-01-13 00:33:04 | phi3    | sentence-transformers/all-MiniLM-L6-v2 | general   | faiss       | 0.543  |      0.3   |      1      |   0.125  |     0.2222 |
+| Timestamp | LLM | Embedding | Dataset | Retriever | AUC | Retrieval Recall |
+| --- | --- | --- | --- | --- | --- | --- |
+| 2026-01-25 23:05:24 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | faiss | 0.9946 | 1.0000 |
+| 2026-01-25 23:19:15 | llama3 | BAAI/bge-small-en-v1.5 | healthcaremagic | faiss | 0.9930 | 1.0000 |
+| 2026-01-25 23:12:23 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | bm25 | 0.9608 | 1.0000 |
+| 2026-01-25 23:26:07 | llama3 | BAAI/bge-small-en-v1.5 | healthcaremagic | bm25 | 0.9608 | 1.0000 |
+| 2026-01-25 23:59:53 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | faiss | 0.9600 | 1.0000 |
+| 2026-01-26 00:44:54 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | msmarco | bm25 | 0.9468 | 1.0000 |
+| 2026-01-26 00:54:11 | llama3 | BAAI/bge-small-en-v1.5 | msmarco | bm25 | 0.9468 | 1.0000 |
+| 2026-01-26 00:40:11 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | msmarco | faiss | 0.9452 | 1.0000 |
+| 2026-01-26 00:49:24 | llama3 | BAAI/bge-small-en-v1.5 | msmarco | faiss | 0.9396 | 1.0000 |
+| 2026-01-26 02:26:53 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | nq | bm25 | 0.9298 | 1.0000 |
+| 2026-01-26 01:51:11 | llama3 | BAAI/bge-small-en-v1.5 | nq | bm25 | 0.9282 | 1.0000 |
+| 2026-01-26 01:40:10 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | nq | bm25 | 0.9282 | 1.0000 |
+| 2026-01-26 01:34:26 | llama3 | sentence-transformers/all-MiniLM-L6-v2 | nq | faiss | 0.9226 | 1.0000 |
+| 2026-01-25 23:46:12 | mistral | BAAI/bge-small-en-v1.5 | healthcaremagic | faiss | 0.9112 | 1.0000 |
+| 2026-01-25 23:32:47 | mistral | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | faiss | 0.9104 | 1.0000 |
+| 2026-01-26 02:20:23 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | nq | faiss | 0.9090 | 1.0000 |
+| 2026-01-26 01:45:28 | llama3 | BAAI/bge-small-en-v1.5 | nq | faiss | 0.8540 | 1.0000 |
+| 2026-01-26 01:25:46 | phi3 | BAAI/bge-small-en-v1.5 | msmarco | faiss | 0.8478 | 1.0000 |
+| 2026-01-26 01:17:14 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | msmarco | faiss | 0.8206 | 1.0000 |
+| 2026-01-26 02:08:36 | mistral | BAAI/bge-small-en-v1.5 | nq | faiss | 0.8084 | 1.0000 |
+| 2026-01-26 01:21:17 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | msmarco | bm25 | 0.7864 | 1.0000 |
+| 2026-01-26 01:29:58 | phi3 | BAAI/bge-small-en-v1.5 | msmarco | bm25 | 0.7864 | 1.0000 |
+| 2026-01-25 23:39:21 | mistral | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | bm25 | 0.7858 | 1.0000 |
+| 2026-01-25 23:53:11 | mistral | BAAI/bge-small-en-v1.5 | healthcaremagic | bm25 | 0.7858 | 1.0000 |
+| 2026-01-26 00:58:39 | mistral | sentence-transformers/all-MiniLM-L6-v2 | msmarco | faiss | 0.7686 | 1.0000 |
+| 2026-01-26 01:08:12 | mistral | BAAI/bge-small-en-v1.5 | msmarco | faiss | 0.7554 | 1.0000 |
+| 2026-01-26 02:14:33 | mistral | BAAI/bge-small-en-v1.5 | nq | bm25 | 0.7492 | 1.0000 |
+| 2026-01-26 02:02:47 | mistral | sentence-transformers/all-MiniLM-L6-v2 | nq | bm25 | 0.7492 | 1.0000 |
+| 2026-01-26 01:56:31 | mistral | sentence-transformers/all-MiniLM-L6-v2 | nq | faiss | 0.7362 | 1.0000 |
+| 2026-01-26 01:03:40 | mistral | sentence-transformers/all-MiniLM-L6-v2 | msmarco | bm25 | 0.7198 | 1.0000 |
+| 2026-01-26 01:12:52 | mistral | BAAI/bge-small-en-v1.5 | msmarco | bm25 | 0.7198 | 1.0000 |
+| 2026-01-26 00:31:47 | phi3 | BAAI/bge-small-en-v1.5 | healthcaremagic | bm25 | 0.5000 | 1.0000 |
+| 2026-01-26 00:22:30 | phi3 | BAAI/bge-small-en-v1.5 | healthcaremagic | faiss | 0.5000 | 1.0000 |
+| 2026-01-26 00:14:12 | phi3 | sentence-transformers/all-MiniLM-L6-v2 | healthcaremagic | bm25 | 0.5000 | 1.0000 |
+| 2026-01-26 02:39:12 | phi3 | BAAI/bge-small-en-v1.5 | nq | faiss | 0.5000 | 1.0000 |
+| 2026-01-26 02:47:11 | phi3 | BAAI/bge-small-en-v1.5 | nq | bm25 | 0.5000 | 1.0000 |
