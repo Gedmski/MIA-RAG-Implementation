@@ -6,6 +6,7 @@ import json
 import torch
 import sys
 import re
+import itertools
 from typing import List, Dict, Tuple, Optional, Set
 from tqdm import tqdm
 from datetime import datetime
@@ -52,7 +53,7 @@ class MIAConfig:
                  dataset_type: str = "healthcaremagic",
                  proxy_model: str = "gpt2",
                  num_masks: int = 5,
-                 top_k_retrieval: int = 10,
+                 retriever_k: int = 3,
                  masking_strategy: str = "hard", # 'hard' or 'random'
                  use_spelling_correction: bool = True,
                  retriever_type: str = "faiss", # 'faiss' or 'bm25'
@@ -63,7 +64,7 @@ class MIAConfig:
         self.dataset_type = dataset_type
         self.proxy_model = proxy_model
         self.num_masks = num_masks
-        self.top_k_retrieval = top_k_retrieval
+        self.retriever_k = retriever_k
         self.masking_strategy = masking_strategy
         self.use_spelling_correction = use_spelling_correction
         self.retriever_type = retriever_type
@@ -71,7 +72,11 @@ class MIAConfig:
         self.eval_size = eval_size
         
     def __repr__(self):
-        return f"Config(LLM={self.llm_model}, Data={self.dataset_type}, Emb={self.embedding_model}, Ret={self.retriever_type}, Idx={self.index_size}, Eval={self.eval_size})"
+        return (
+            f"Config(LLM={self.llm_model}, Data={self.dataset_type}, Emb={self.embedding_model}, "
+            f"Ret={self.retriever_type}, M={self.num_masks}, K={self.retriever_k}, "
+            f"Idx={self.index_size}, Eval={self.eval_size})"
+        )
 
 # --- 1. Data Loading & Preprocessing ---
 def load_real_dataset(dataset_type: str = "healthcaremagic", sample_size: int = 50) -> List[Document]:
@@ -388,7 +393,7 @@ class RAGSystem:
             try:
                 from langchain_community.retrievers import BM25Retriever
                 self.retriever = BM25Retriever.from_documents(documents)
-                self.retriever.k = config.top_k_retrieval
+                self.retriever.k = config.retriever_k
                 self.vector_store = None
             except ImportError:
                 print("Error: rank_bm25 not installed. Install with `pip install rank_bm25`")
@@ -396,7 +401,7 @@ class RAGSystem:
         else:
             print(f"Building FAISS Index with {len(documents)} documents...")
             self.vector_store = FAISS.from_documents(documents, self.embeddings)
-            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.top_k_retrieval})
+            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.retriever_k})
         
         print(f"Initializing LLM: {config.llm_model}")
         self.llm = OllamaLLM(model=config.llm_model, temperature=0.0)
@@ -539,100 +544,112 @@ if __name__ == "__main__":
     llms = ["llama3", "mistral", "phi3"]
     embeddings = ["sentence-transformers/all-MiniLM-L6-v2", "BAAI/bge-small-en-v1.5"]
     retrievers = ["faiss", "bm25"]
+    num_masks_list = [5, 10, 15]
+    retriever_k_list = [3, 5]
 
-    for d_type in datasets:
-        for model in llms:
-            for emb in embeddings:
-                for ret in retrievers:
-                    try:
-                        print(f"\n\n==================================================")
-                        print(f"Running Experiment: Dataset={d_type}, LLM={model}, Embed={emb}, Ret={ret}")
-                        print(f"==================================================")
-                        
-                        # 1. Pipeline Setup
-                        start_time = datetime.now()
-                        
-                        # Config
-                        config = MIAConfig(
-                            llm_model=model,
-                            embedding_model=emb,
-                            dataset_type=d_type,
-                            masking_strategy="hard",
-                            num_masks=5,
-                            retriever_type=ret,
-                            index_size=500, # Large haystack
-                            eval_size=50    # Quick eval
-                        )
-                        
-                        # 2. Data
-                        # Load enough documents for the Index
-                        documents = load_real_dataset(config.dataset_type, sample_size=config.index_size)
-                        if not documents:
-                            print("Skipping due to empty dataset.")
-                            continue
-                            
-                        # Split: 80% Members (Indexed), 20% Non-Members (Not Indexed)
-                        members, non_members = prepare_splits(documents, split_ratio=0.8)
-                        
-                        # 3. Build RAG
-                        # Index ALL Members to create the "Haystack"
-                        print(f"Indexing {len(members)} Member documents...")
-                        rag = RAGSystem(config, members)
-                        
-                        # 4. Attack
-                        attacker = MIAAttacker(config)
-                        
-                        # Sub-sample for Evaluation
-                        # We only attack 'eval_size' documents to save time, but they are hidden among all 'members'
-                        eval_members = random.sample(members, min(len(members), config.eval_size))
-                        eval_non_members = random.sample(non_members, min(len(non_members), config.eval_size))
-                        
-                        print(f"\n--- Attacking {len(eval_members)} Member Documents (from {len(members)} indexed) ---")
-                        member_results = attacker.run_experiment(rag, eval_members, is_member=True)
-                        
-                        print(f"\n--- Attacking {len(eval_non_members)} Non-Member Documents ---")
-                        non_member_results = attacker.run_experiment(rag, eval_non_members, is_member=False)
-                        
-                        # 5. Evaluation & Logging
-                        all_results = member_results + non_member_results
-                        if not all_results:
-                            print("No results generated.")
-                            continue
-                            
-                        y_true = [r['is_member'] for r in all_results]
-                        y_scores = [r['mask_acc'] for r in all_results]
-                        
-                        retrieval_recalls = [r['retrieval_recall'] for r in member_results]
-                        avg_recall = sum(retrieval_recalls) / len(retrieval_recalls) if retrieval_recalls else 0.0
-                        
-                        auc_score = 0
-                        if len(set(y_true)) > 1:
-                            auc_score = roc_auc_score(y_true, y_scores)
-                            
-                        print(f"AUC: {auc_score:.4f}, Recall: {avg_recall:.4f}")
-                        
-                        # Log to MD
-                        with open("experiment_results.md", "a") as f:
-                            f.write(f"\n## Run {start_time}\n")
-                            f.write(f"- **Config**: {config}\n") # Using repr for details
-                            f.write(f"- **AUC**: {auc_score:.4f}\n")
-                            f.write(f"- **Retrieval Recall**: {avg_recall:.4f}\n")
-                            f.write(f"- **Index Size**: {len(members)}\n")
-                            f.write(f"- **Eval Samples**: {len(all_results)} (M:{len(member_results)}, NM:{len(non_member_results)})\n")
-                            f.write("---\n")
-                            
-                        # Clean up
-                        del rag
-                        del attacker
-                        if torch.cuda.is_available():
-                            torch.cuda.empty_cache()
-                            
-                    except Exception as e:
-                        print(f"FAILED Experiment {d_type}/{model}: {e}")
-                        with open("experiment_results.md", "a") as f:
-                             f.write(f"\n## Run {datetime.now()} - FAILED\n")
-                             f.write(f"- **Config**: {d_type}, {model}, {emb}, {ret}\n")
-                             f.write(f"- **Error**: {e}\n")
-                             f.write("---\n")
+    experiments = list(itertools.product(
+        datasets, llms, embeddings, retrievers, num_masks_list, retriever_k_list
+    ))
+    print(f"Starting Grid Search: {len(experiments)} total configurations.")
+
+    for run_idx, (d_type, model, emb, ret, m, k) in enumerate(experiments, start=1):
+        try:
+            print(f"\n\n==================================================")
+            print(
+                f"Run {run_idx}/{len(experiments)}: Dataset={d_type}, LLM={model}, "
+                f"Embed={emb}, Ret={ret}, M={m}, K={k}"
+            )
+            print(f"==================================================")
+            
+            # 1. Pipeline Setup
+            start_time = datetime.now()
+            
+            # Config
+            config = MIAConfig(
+                llm_model=model,
+                embedding_model=emb,
+                dataset_type=d_type,
+                masking_strategy="hard",
+                num_masks=m,
+                retriever_k=k,
+                retriever_type=ret,
+                index_size=500, # Large haystack
+                eval_size=50    # Quick eval
+            )
+            
+            # 2. Data
+            # Load enough documents for the Index
+            documents = load_real_dataset(config.dataset_type, sample_size=config.index_size)
+            if not documents:
+                print("Skipping due to empty dataset.")
+                continue
+                
+            # Split: 80% Members (Indexed), 20% Non-Members (Not Indexed)
+            members, non_members = prepare_splits(documents, split_ratio=0.8)
+            
+            # 3. Build RAG
+            # Index ALL Members to create the "Haystack"
+            print(f"Indexing {len(members)} Member documents...")
+            rag = RAGSystem(config, members)
+            
+            # 4. Attack
+            attacker = MIAAttacker(config)
+            
+            # Sub-sample for Evaluation
+            # We only attack 'eval_size' documents to save time, but they are hidden among all 'members'
+            eval_members = random.sample(members, min(len(members), config.eval_size))
+            eval_non_members = random.sample(non_members, min(len(non_members), config.eval_size))
+            
+            print(f"\n--- Attacking {len(eval_members)} Member Documents (from {len(members)} indexed) ---")
+            member_results = attacker.run_experiment(rag, eval_members, is_member=True)
+            
+            print(f"\n--- Attacking {len(eval_non_members)} Non-Member Documents ---")
+            non_member_results = attacker.run_experiment(rag, eval_non_members, is_member=False)
+            
+            # 5. Evaluation & Logging
+            all_results = member_results + non_member_results
+            if not all_results:
+                print("No results generated.")
+                continue
+                
+            y_true = [r['is_member'] for r in all_results]
+            y_scores = [r['mask_acc'] for r in all_results]
+            
+            retrieval_recalls = [r['retrieval_recall'] for r in member_results]
+            avg_recall = sum(retrieval_recalls) / len(retrieval_recalls) if retrieval_recalls else 0.0
+            
+            auc_score = 0
+            if len(set(y_true)) > 1:
+                auc_score = roc_auc_score(y_true, y_scores)
+                
+            print(f"AUC: {auc_score:.4f}, Recall: {avg_recall:.4f}")
+            
+            # Log to MD
+            with open("experiment_results.md", "a") as f:
+                f.write(f"\n## Run {start_time}\n")
+                f.write(f"- **Config**: {config}\n")
+                f.write(f"- **Num Masks**: {config.num_masks}\n")
+                f.write(f"- **Retriever K**: {config.retriever_k}\n")
+                f.write(f"- **AUC**: {auc_score:.4f}\n")
+                f.write(f"- **Retrieval Recall**: {avg_recall:.4f}\n")
+                f.write(f"- **Index Size**: {len(members)}\n")
+                f.write(f"- **Eval Samples**: {len(all_results)} (M:{len(member_results)}, NM:{len(non_member_results)})\n")
+                f.write("---\n")
+                
+            # Clean up
+            del rag
+            del attacker
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+        except Exception as e:
+            print(f"FAILED Experiment {d_type}/{model}/{ret}/M={m}/K={k}: {e}")
+            with open("experiment_results.md", "a") as f:
+                 f.write(f"\n## Run {datetime.now()} - FAILED\n")
+                 f.write(f"- **Config**: Dataset={d_type}, LLM={model}, Emb={emb}, Ret={ret}\n")
+                 f.write(f"- **Num Masks**: {m}\n")
+                 f.write(f"- **Retriever K**: {k}\n")
+                 f.write(f"- **Error**: {e}\n")
+                 f.write("---\n")
 
     print("\n--- All Ablation Studies Completed ---")

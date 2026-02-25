@@ -1,108 +1,102 @@
-# Proposal for Project Refinement: Mask-Based Membership Inference Attack (MBA)
+# Expanding the MBA Grid Search (Option A)
 
-**Date:** January 25, 2026
-**Subject:** Critical Methodological Alignments and Stability Fixes for MBA Implementation
+This guide outlines the steps to inject the mathematical hyperparameters (`num_masks` and `retriever_k`) into your existing ablation pipeline. This satisfies the requirement to test the attack's sensitivity to mask volume and retrieval depth.
 
-## 1. Executive Summary
-Following a review of the initial experimental logs (`experiment_failures.txt`, `experiment_results.md`) and a detailed comparison with the source paper *"Mask-based Membership Inference Attacks for Retrieval-Augmented Generation" (Liu et al., 2025)*, we have identified substantial deviations in the current implementation.
+## 1. Update `MIAConfig` in `mia_rag_attack.py`
 
-While the current Llama-3 implementation achieves an AUC of 1.0, this "perfect" score suggests trivial exact-match retrieval rather than robust semantic inference. Furthermore, severe CUDA instabilities were observed on the Legal dataset. This proposal outlines the necessary changes to strictly adhere to the paper's algorithms (specifically dealing with tokenization and spelling) and to resolve the crash-inducing technical constraints.
+First, expose `retriever_k` in your configuration class so it can be dynamically assigned during the grid search.
 
----
+```python
+from dataclasses import dataclass
 
-## 2. Critical Stability Fixes (Priority 1)
+@dataclass
+class MIAConfig:
+    dataset_type: str = "healthcaremagic"
+    llm_model: str = "llama3"
+    retriever_type: str = "faiss"
+    embedding_model: str = "all-MiniLM-L6-v2"
+    masking_strategy: str = "hard"
+    num_masks: int = 5          # Already exists, just needs to be varied
+    retriever_k: int = 3        # NEW: Expose K for the retriever
+    index_size: int = 500
+    eval_size: int = 50
 
-**Issue Identified:**
-The `experiment_failures.txt` log reports repeated `CUDA error: device-side assert triggered` failures, specifically on **Legal** datasets using `sentence-transformers/all-MiniLM-L6-v2`.
-**Root Cause:**
-Legal documents (BillSum) are lengthy. The embedding models utilized have a hard limit (typically 512 tokens). When documents exceed this limit without truncation, the index lookup fails on the GPU, causing the device-side assertion error.
+```
 
-**Proposed Implementation:**
-We must implement explicit token truncation during the **RAG Vector Store Ingestion** phase, consistent with the paper's handling of document chunks.
+## 2. Update Retriever Instantiation
 
-*   **Action:** Modify the embedding generation pipeline to enforce `truncation=True` and `max_length=512`.
-*   **Rationale:** This will resolve the crash loop on the Legal dataset and allow the ablation study to complete for all domains.
+Locate the function or method where you instantiate FAISS and BM25. Ensure they accept and apply `config.retriever_k` instead of a hardcoded value.
 
----
+```python
+# Example for LangChain retriever setup
+retriever = vectorstore.as_retriever(search_kwargs={"k": config.retriever_k})
 
-## 3. Methodological Alignment with Research Paper
+```
 
-The current implementation uses a simplified probability ranking for masking. To reproduce the paper's validity, we must implement the specific heuristics defined in the authors' **Mask Generation Algorithm (Algorithm 4)**.
+## 3. Expand the Grid Search Loop
 
-### 3.1. Implement "Fragmented Word Extraction"
-**Current State:** The proxy model masks words based solely on probability.
-**Paper Requirement:** The paper notes that tokenizers often split complex words (e.g., "canestan" $\rightarrow$ "can", "est", "an"). Masking only part of a word confuses the attack.
-**Proposed Change:**
-*   Implement **Algorithm 2** from the paper.
-*   Scan for consecutive tokens without whitespace and treat them as a single unit.
-*   If a fragmented word is selected for masking, **all** constituent tokens must be masked together.
+In the `__main__` execution block of `mia_rag_attack.py`, add the new hyperparameter arrays to your grid search logic. Note that expanding these dimensions will significantly increase the total number of experiment runs (e.g., adding 3 `M` values and 2 `K` values multiplies your total runs by 6).
 
-### 3.2. Implement "Misspelled Word Correction"
-**Current State:** No spelling checks are performed.
-**Paper Requirement:** The paper highlights that LLMs will "fix" typos rather than predict them. If the original document has a typo (e.g., "nearlt"), and we mask it, the RAG might retrieve the doc but generate the correct spelling "nearly," leading to a mismatch in our scoring.
-**Proposed Change:**
-*   Implement **Algorithm 1**.
-*   Integrate the `oliverguhr/spelling-correction-english-base` model (as specified in).
-*   **Logic:** If a masked word is misspelled, add *both* the original misspelled word and the corrected version to the "Ground Truth" answer set. If the RAG predicts either, it counts as a success.
+```python
+import itertools
 
-### 3.3. Adjacency Filtering
-**Current State:** Top $M$ hard words are masked, potentially selecting adjacent words.
-**Paper Requirement:** Masking adjacent words (e.g., "[MASK] [MASK]") causes the LLM to lose track of how many words to generate.
-**Proposed Change:**
-*   Add a constraint to the `rank_words` function: If word $i$ is masked, word $i+1$ and $i-1$ cannot be masked, regardless of their difficulty rank.
+if __name__ == "__main__":
+    # Existing dimensions
+    datasets = ["healthcaremagic", "msmarco", "nq"]
+    llms = ["llama3", "mistral", "phi3"]
+    embeddings = ["all-MiniLM-L6-v2", "bge-small-en-v1.5"]
+    retrievers = ["faiss", "bm25"]
+    
+    # NEW: Mathematical Hyperparameters
+    num_masks_list = [5, 10, 15]   # Testing M
+    retriever_k_list = [3, 5]      # Testing K
 
----
+    # Generate all combinations
+    experiments = list(itertools.product(
+        datasets, llms, embeddings, retrievers, num_masks_list, retriever_k_list
+    ))
 
-## 4. Addressing "Too Good To Be True" Results (Validity)
+    print(f"Starting Grid Search: {len(experiments)} total configurations.")
 
-**Issue Identified:**
-Our logs show **AUC = 1.0000** for Llama-3 on General and Medical datasets. This indicates the task is currently trivial—likely due to exact string matching between the masked query and the database document.
+    for (dataset, llm, emb, ret, m, k) in experiments:
+        config = MIAConfig(
+            dataset_type=dataset,
+            llm_model=llm,
+            embedding_model=emb,
+            retriever_type=ret,
+            num_masks=m,
+            retriever_k=k,
+            index_size=500,
+            eval_size=50
+        )
+        
+        # Call your existing pipeline execution function here
+        # run_experiment(config)
 
-**Proposed Change: Paraphrasing & Robustness Checks**
-To ensure we are measuring *membership inference* and not just *string matching*, we should implement the **Defense Strategies** analyzed in the paper.
+```
 
-*   **Action:** Implement a **Paraphrasing** step for the input query.
-*   **Logic:** Before feeding the masked text to the RAG, slightly paraphrase the surrounding context (unmasked parts).
-*   **Expected Outcome:** AUC should drop from 1.0 to a realistic range (0.85–0.95), proving the attack works based on semantic information recovery as claimed in the paper.
+## 4. Addressing the Threshold Fraction (`y`)
 
----
+You do not need to add `y` to the grid search. Because your evaluation pipeline calculates the continuous Area Under the Curve (AUC) for the Receiver Operating Characteristic (ROC), it is already mathematically evaluating the performance across *all possible* classification thresholds. You can state this directly in your report to defend its omission from the ablation variables.
 
-## 5. Metric & Baseline Expansion
+## 5. Updates for `README.md`
 
-To strictly follow the paper's evaluation protocol, we need to expand our metrics beyond simple Accuracy/AUC.
+Add the new parameters to your Configuration table to ensure the documentation reflects the new system capabilities.
 
-### 5.1. Retrieval Recall
-**Paper Reference:** The paper introduces "Retrieval Recall" to verify if the RAG actually found the document.
-**Implementation:**
-*   Modify the retriever to return the IDs of the retrieved chunks.
-*   **Metric:** check if `Target_Document_ID` is present in `Retrieved_IDs`.
-*   This will help diagnose why **Phi-3** is failing (AUC 0.54)—is it failing to retrieve, or failing to generate?
+| Parameter | Options / Description | Default |
+| --- | --- | --- |
+| `num_masks` | Number of words to mask per document (Testing `5`, `10`, `15`) | `5` |
+| `retriever_k` | Number of documents retrieved by RAG (Testing `3`, `5`) | `3` |
 
-### 5.2. Random Baseline
-**Paper Reference:** The paper compares the "Hard Word" attack against a "Random Masking" baseline.
-**Implementation:**
-*   Add a `masking_strategy` parameter to the pipeline.
-*   Run a full experiment set where masks are chosen randomly (excluding stop words).
-*   **Goal:** Demonstrate that the "Proxy Model" approach yields a higher AUC than random guessing.
+Update the "Usage" section to reflect the expanded scope:
 
----
+```markdown
+**This will run 216+ experiments** iterating through:
+- **Datasets**: `healthcaremagic`, `msmarco`, `nq`
+- **LLMs**: `llama3`, `mistral`, `phi3`
+- **Embeddings**: `all-MiniLM-L6-v2`, `bge-small-en-v1.5`
+- **Retrievers**: `faiss` (Dense), `bm25` (Sparse)
+- **Masks (M)**: `5`, `10`, `15`
+- **Retrieved Docs (K)**: `3`, `5`
 
-## 6. Model-Specific Optimization (Phi-3)
-
-**Issue:** Phi-3 performed near random guessing (AUC 0.54).
-**Hypothesis:** Smaller models struggle with complex JSON-like output formatting instructions.
-**Proposed Change:**
-*   Review the prompt template against **Figure 5** in the paper.
-*   For Phi-3 specifically, simplify the system prompt to use a one-shot example (providing an example of a masked input and the expected output format) to enforce compliance.
-
----
-
-### Summary of Action Plan
-
-1.  **Fix:** Add `truncation=True` to Embedding loading (resolves CUDA crashes).
-2.  **Code:** Implement `FragmentedWordExtraction` and `AdjacencyFilter`.
-3.  **Code:** Integrate `spelling-correction-english-base` model.
-4.  **Evaluate:** Add "Random" baseline run.
-5.  **Metric:** Log `Retrieval_Recall` to debug Phi-3 performance.
-
-Implementing these changes will transition the project from a basic proof-of-concept to a rigorous reproduction of the Liu et al. (2025) research.
+```
