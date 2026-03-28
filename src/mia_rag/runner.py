@@ -71,19 +71,29 @@ def run_experiments(config_path: str | Path) -> Path:
     spec = load_experiment_spec(config_path)
     configs = expand_experiment_configs(spec)
     run_dir = create_run_directory(spec.paths.results_root)
+    print(f"Loaded config: {config_path}")
+    print(f"Resolved {len(configs)} runs")
+    print(f"Writing outputs to: {run_dir}")
     dump_yaml(_serialize_spec(spec, configs), run_dir / "resolved_config.yaml")
 
     dataset_cache: dict[str, object] = {}
     records: list[dict] = []
     failures: list[dict] = []
 
-    for config in configs:
+    for index, config in enumerate(configs, start=1):
         started_at = _timestamp()
         try:
+            print(
+                f"[{index}/{len(configs)}] dataset={config.dataset_name} model={config.llm_model} "
+                f"retriever={config.retriever_type} embedding={config.embedding_model} "
+                f"M={config.num_masks} K={config.retriever_k}"
+            )
             if config.dataset_name not in dataset_cache:
+                print(f"  loading dataset '{config.dataset_name}' with loader '{config.dataset_loader}'")
                 loader = get_dataset_loader(config.dataset_loader)
                 dataset_spec = next(item for item in spec.datasets if item.name == config.dataset_name)
                 documents = loader.load_documents(dataset_spec)
+                print(f"  normalized documents available: {len(documents)}")
                 dataset_cache[config.dataset_name] = prepare_dataset_split(
                     documents,
                     index_size=config.index_size,
@@ -100,11 +110,16 @@ def run_experiments(config_path: str | Path) -> Path:
                 **result,
             }
             records.append(record)
+            print(
+                f"  success auc={record['auc']:.4f} recall={record['retrieval_recall']:.4f} "
+                f"runtime={record['runtime_seconds']:.1f}s"
+            )
         except Exception as error:
             finished_at = _timestamp()
             failure_record = _build_failure_record(config, started_at, finished_at, error)
             failures.append(failure_record)
             records.append(failure_record)
+            print(f"  failed: {error}")
             if not spec.runtime.continue_on_error:
                 break
 

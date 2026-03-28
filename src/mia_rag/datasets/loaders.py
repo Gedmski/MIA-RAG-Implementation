@@ -20,9 +20,18 @@ class HealthCareMagicLoader(DatasetLoader):
 
     def iter_records(self, spec: DatasetSpec) -> Iterable[DocumentRecord]:
         dataset = self.load_split(spec)
+        text_fields = spec.loader_options.get("text_fields", ["text"])
         question_keys = spec.loader_options.get("question_fields", ["input", "instruction"])
         answer_keys = spec.loader_options.get("answer_fields", ["output", "response"])
         for index, row in enumerate(dataset):
+            text = _first_non_empty(row, text_fields)
+            if text:
+                yield DocumentRecord(
+                    doc_id=str(row.get("id", index)),
+                    text=text,
+                    metadata={"source_id": row.get("id")},
+                )
+                continue
             question = _first_non_empty(row, question_keys)
             answer = _first_non_empty(row, answer_keys)
             if not question and not answer:
@@ -90,14 +99,26 @@ class ArxivLoader(DatasetLoader):
         title_fields = spec.loader_options.get("title_fields", ["title", "Titles"])
         abstract_fields = spec.loader_options.get("abstract_fields", ["abstract", "Abstracts"])
         category_fields = spec.loader_options.get("category_fields", ["categories", "Categories"])
+        fallback_text_fields = spec.loader_options.get("fallback_text_fields", ["text", "summary", "paper"])
         requested_category = (spec.category or "").strip().lower()
 
         for index, row in enumerate(dataset):
             categories = _first_non_empty(row, category_fields)
-            if requested_category and requested_category not in categories.lower():
+            normalized_categories = categories.lower() if categories else ""
+            if requested_category and normalized_categories and requested_category not in normalized_categories:
                 continue
             title = _first_non_empty(row, title_fields)
             abstract = _first_non_empty(row, abstract_fields)
+            if not title and not abstract:
+                fallback_text = _first_non_empty(row, fallback_text_fields)
+                if not fallback_text:
+                    continue
+                yield DocumentRecord(
+                    doc_id=str(row.get("id", index)),
+                    text=fallback_text,
+                    metadata={"source_id": row.get("id"), "categories": categories},
+                )
+                continue
             combined = "\n".join(part for part in [f"Title: {title}" if title else "", f"Abstract: {abstract}" if abstract else ""] if part)
             if not combined:
                 continue

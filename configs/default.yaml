@@ -14,6 +14,8 @@ datasets:
     eval_size: 50
     min_chars: 200
     max_chars: 2500
+    text_fields:
+      - text
   - name: msmarco
     loader: msmarco
     enabled: true
@@ -49,11 +51,17 @@ datasets:
     enabled: true
     dataset_id: MaartenGr/arxiv_nlp
     split: train
-    category: cs.CL
+    category: Computation and Language
     index_size: 500
     eval_size: 50
     min_chars: 120
     max_chars: 2500
+    title_fields:
+      - Titles
+    abstract_fields:
+      - Abstracts
+    category_fields:
+      - Categories
 
 models:
   - llama3

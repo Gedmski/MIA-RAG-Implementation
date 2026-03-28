@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import abc
 import re
-from typing import Iterable
+from typing import Any, Iterable
 
 from ..config import DatasetSpec
 from ..types import DocumentRecord
@@ -40,6 +40,19 @@ class DatasetLoader(abc.ABC):
     def iter_records(self, spec: DatasetSpec) -> Iterable[DocumentRecord]:
         raise NotImplementedError
 
+    def inspect_source(self, spec: DatasetSpec) -> dict[str, Any]:
+        try:
+            dataset = self.load_split(spec)
+            iterator = iter(dataset)
+            first_row = next(iterator)
+            return {
+                "first_row_keys": sorted(first_row.keys()) if isinstance(first_row, dict) else [],
+            }
+        except Exception as exc:
+            return {
+                "inspection_error": str(exc),
+            }
+
     def load_documents(self, spec: DatasetSpec) -> list[DocumentRecord]:
         documents: list[DocumentRecord] = []
         seen_texts: set[str] = set()
@@ -59,8 +72,10 @@ class DatasetLoader(abc.ABC):
                 break
 
         if len(documents) < required:
+            inspection = self.inspect_source(spec)
             raise ValueError(
-                f"Dataset {spec.name} produced {len(documents)} documents, fewer than required {required}."
+                f"Dataset {spec.name} produced {len(documents)} documents, fewer than required {required}. "
+                f"Loader options={spec.loader_options}. Inspection={inspection}"
             )
         return documents
 
