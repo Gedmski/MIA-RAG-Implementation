@@ -1,0 +1,66 @@
+paths:
+  results_root: results
+  legacy_experiment_log: experiment_results.md
+  legacy_csv: experiment_data.csv
+  legacy_report: results_report.md
+
+datasets:
+  - name: healthcaremagic
+    loader: healthcaremagic
+    enabled: true
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    split: train
+    index_size: 40
+    eval_size: 10
+    min_chars: 200
+    max_chars: 1200
+  - name: fiqa
+    loader: fiqa
+    enabled: true
+    dataset_id: BeIR/fiqa
+    dataset_config: corpus
+    split: corpus
+    index_size: 40
+    eval_size: 10
+    min_chars: 120
+    max_chars: 1200
+  - name: arxiv
+    loader: arxiv
+    enabled: true
+    dataset_id: MaartenGr/arxiv_nlp
+    split: train
+    category: cs.CL
+    index_size: 40
+    eval_size: 10
+    min_chars: 120
+    max_chars: 1200
+
+models:
+  - llama3
+
+retrievers:
+  - faiss
+
+embeddings:
+  - sentence-transformers/all-MiniLM-L6-v2
+
+sweeps:
+  num_masks:
+    - 3
+    - 5
+  retriever_k:
+    - 1
+    - 3
+
+runtime:
+  proxy_model: gpt2
+  masking_strategy: hard
+  use_spelling_correction: true
+  seed: 42
+  continue_on_error: true
+  limit_runs: 6
+  llm_temperature: 0.0
+
+reporting:
+  generate_plots: true
+  copy_legacy_outputs: true
