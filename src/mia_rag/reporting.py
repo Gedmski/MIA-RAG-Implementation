@@ -11,27 +11,59 @@ from .legacy import LEGACY_COMPAT_COLUMNS, render_legacy_markdown, structured_to
 
 
 SUMMARY_COLUMNS = [
+    "study_name",
     "run_name",
     "started_at",
     "finished_at",
     "status",
     "dataset",
     "dataset_loader",
+    "model_provider",
     "llm_model",
+    "llm_model_name",
     "embedding_model",
+    "embedding_model_name",
     "retriever_type",
     "num_masks",
     "retriever_k",
+    "gamma",
     "index_size",
     "eval_size",
     "member_samples",
     "non_member_samples",
     "auc",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
     "retrieval_recall",
     "runtime_seconds",
     "failure_reason",
     "config_repr",
 ]
+NUMERIC_COLUMNS = [
+    "num_masks",
+    "retriever_k",
+    "gamma",
+    "index_size",
+    "eval_size",
+    "member_samples",
+    "non_member_samples",
+    "auc",
+    "accuracy",
+    "precision",
+    "recall",
+    "f1",
+    "retrieval_recall",
+    "runtime_seconds",
+]
+
+
+def _coerce_numeric_columns(dataframe: pd.DataFrame) -> pd.DataFrame:
+    for column in NUMERIC_COLUMNS:
+        if column in dataframe.columns:
+            dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce")
+    return dataframe
 
 
 def load_structured_records(path: str | Path) -> pd.DataFrame:
@@ -51,19 +83,7 @@ def load_structured_records(path: str | Path) -> pd.DataFrame:
     dataframe = pd.DataFrame(rows)
     if dataframe.empty:
         return pd.DataFrame(columns=SUMMARY_COLUMNS)
-    for column in [
-        "num_masks",
-        "retriever_k",
-        "index_size",
-        "eval_size",
-        "member_samples",
-        "non_member_samples",
-        "auc",
-        "retrieval_recall",
-        "runtime_seconds",
-    ]:
-        if column in dataframe.columns:
-            dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce")
+    dataframe = _coerce_numeric_columns(dataframe)
     return dataframe.reindex(columns=SUMMARY_COLUMNS)
 
 
@@ -77,19 +97,7 @@ def build_summary_dataframe(records: Iterable[dict]) -> pd.DataFrame:
     dataframe = pd.DataFrame(list(records))
     if dataframe.empty:
         return pd.DataFrame(columns=SUMMARY_COLUMNS)
-    for column in [
-        "num_masks",
-        "retriever_k",
-        "index_size",
-        "eval_size",
-        "member_samples",
-        "non_member_samples",
-        "auc",
-        "retrieval_recall",
-        "runtime_seconds",
-    ]:
-        if column in dataframe.columns:
-            dataframe[column] = pd.to_numeric(dataframe[column], errors="coerce")
+    dataframe = _coerce_numeric_columns(dataframe)
     return dataframe.reindex(columns=SUMMARY_COLUMNS)
 
 
@@ -123,17 +131,101 @@ def _successful_runs(dataframe: pd.DataFrame) -> pd.DataFrame:
     return dataframe[dataframe["status"] == "success"].copy()
 
 
+def _has_multiple_studies(dataframe: pd.DataFrame) -> bool:
+    study_names = [name for name in dataframe.get("study_name", pd.Series(dtype=str)).dropna().unique() if str(name).strip()]
+    return len(study_names) > 1
+
+
+def _metric_text(value: object) -> str:
+    if value is None or pd.isna(value):
+        return "n/a"
+    return f"{float(value):.4f}"
+
+
 def _group_metric(dataframe: pd.DataFrame, group_by: list[str]) -> pd.DataFrame:
     subset = _successful_runs(dataframe).dropna(subset=["auc"])
     if subset.empty:
-        return pd.DataFrame(columns=group_by + ["auc", "retrieval_recall"])
+        return pd.DataFrame(columns=group_by + ["auc", "f1", "retrieval_recall"])
     grouped = (
-        subset.groupby(group_by)[["auc", "retrieval_recall"]]
+        subset.groupby(group_by)[["auc", "f1", "retrieval_recall"]]
         .mean()
         .reset_index()
-        .sort_values(["auc", "retrieval_recall"], ascending=[False, False])
+        .sort_values(["auc", "f1", "retrieval_recall"], ascending=[False, False, False])
     )
     return grouped
+
+
+def _append_dataset_sections(lines: list[str], dataframe: pd.DataFrame) -> None:
+    for dataset_name in sorted(dataframe["dataset"].dropna().unique()):
+        dataset_frame = dataframe[dataframe["dataset"] == dataset_name].copy()
+        lines.extend([f"## Dataset: {dataset_name}", ""])
+        model_table = _group_metric(dataset_frame, ["llm_model"])
+        lines.extend(
+            [
+                "### Model Comparison",
+                "",
+                _format_table(
+                    model_table.rename(
+                        columns={
+                            "llm_model": "Model",
+                            "auc": "AUC",
+                            "f1": "F1",
+                            "retrieval_recall": "Recall",
+                        }
+                    )
+                ),
+                "",
+            ]
+        )
+
+        retriever_embedding = (
+            dataset_frame.groupby(["retriever_type", "embedding_model"])[["auc", "f1", "retrieval_recall"]]
+            .mean()
+            .reset_index()
+            .sort_values(["auc", "f1"], ascending=False)
+        )
+        lines.extend(
+            [
+                "### Retriever x Embedding",
+                "",
+                _format_table(
+                    retriever_embedding.rename(
+                        columns={
+                            "retriever_type": "Retriever",
+                            "embedding_model": "Embedding",
+                            "auc": "AUC",
+                            "f1": "F1",
+                            "retrieval_recall": "Recall",
+                        }
+                    )
+                ),
+                "",
+            ]
+        )
+
+        best_worst = (
+            dataset_frame.sort_values("auc", ascending=False)[
+                ["llm_model", "retriever_type", "embedding_model", "num_masks", "retriever_k", "gamma", "auc", "f1"]
+            ]
+        )
+        lines.extend(
+            [
+                "### Best And Worst Configurations",
+                "",
+                _format_table(pd.concat([best_worst.head(3), best_worst.tail(3)], ignore_index=True)),
+                "",
+            ]
+        )
+
+        for model_name in sorted(dataset_frame["llm_model"].dropna().unique()):
+            model_frame = dataset_frame[dataset_frame["llm_model"] == model_name]
+            pivot = model_frame.pivot_table(
+                index="num_masks",
+                columns="retriever_k",
+                values="auc",
+                aggfunc="mean",
+            ).sort_index().sort_index(axis=1)
+            lines.extend([f"### M x K Matrix: {model_name}", "", _format_table(pivot.reset_index().rename(columns={"num_masks": "M"})), ""])
 
 
 def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
@@ -147,41 +239,37 @@ def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
         output.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return
 
-    best_row = successful.sort_values("auc", ascending=False).iloc[0]
+    best_row = successful.sort_values(["auc", "f1"], ascending=False).iloc[0]
     lines.extend(
         [
             "## Summary",
             "",
             f"- Successful runs: `{len(successful)}`",
             f"- Failed runs: `{int((dataframe['status'] == 'failed').sum())}`",
-            f"- Best dataset/config: `{best_row['dataset']} / {best_row['llm_model']} / {best_row['retriever_type']} / M={int(best_row['num_masks'])} / K={int(best_row['retriever_k'])}`",
-            f"- Best AUC: `{best_row['auc']:.4f}`",
+            f"- Best study/config: `{best_row['study_name']} / {best_row['dataset']} / {best_row['llm_model']} / {best_row['retriever_type']} / M={int(best_row['num_masks'])} / K={int(best_row['retriever_k'])} / gamma={_metric_text(best_row['gamma'])}`",
+            f"- Best AUC: `{_metric_text(best_row['auc'])}`",
+            f"- Best F1: `{_metric_text(best_row['f1'])}`",
             "",
         ]
     )
 
-    for dataset_name in sorted(successful["dataset"].dropna().unique()):
-        dataset_frame = successful[successful["dataset"] == dataset_name].copy()
-        lines.extend([f"## Dataset: {dataset_name}", ""])
-        model_table = _group_metric(dataset_frame, ["llm_model"])
-        lines.extend(["### Model Comparison", "", _format_table(model_table.rename(columns={"llm_model": "Model", "auc": "AUC", "retrieval_recall": "Recall"})), ""])
-
-        retriever_embedding = (
-            dataset_frame.groupby(["retriever_type", "embedding_model"])[["auc", "retrieval_recall"]]
+    if _has_multiple_studies(successful):
+        study_summary = (
+            successful.groupby("study_name")[["auc", "f1", "retrieval_recall"]]
             .mean()
             .reset_index()
-            .sort_values("auc", ascending=False)
+            .sort_values(["auc", "f1"], ascending=False)
         )
         lines.extend(
             [
-                "### Retriever x Embedding",
+                "## Study Overview",
                 "",
                 _format_table(
-                    retriever_embedding.rename(
+                    study_summary.rename(
                         columns={
-                            "retriever_type": "Retriever",
-                            "embedding_model": "Embedding",
+                            "study_name": "Study",
                             "auc": "AUC",
+                            "f1": "F1",
                             "retrieval_recall": "Recall",
                         }
                     )
@@ -189,23 +277,12 @@ def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
                 "",
             ]
         )
-
-        best_worst = (
-            dataset_frame.sort_values("auc", ascending=False)[
-                ["llm_model", "retriever_type", "embedding_model", "num_masks", "retriever_k", "auc", "retrieval_recall"]
-            ]
-        )
-        lines.extend(["### Best And Worst Configurations", "", _format_table(pd.concat([best_worst.head(3), best_worst.tail(3)], ignore_index=True)), ""])
-
-        for model_name in sorted(dataset_frame["llm_model"].dropna().unique()):
-            model_frame = dataset_frame[dataset_frame["llm_model"] == model_name]
-            pivot = model_frame.pivot_table(
-                index="num_masks",
-                columns="retriever_k",
-                values="auc",
-                aggfunc="mean",
-            ).sort_index().sort_index(axis=1)
-            lines.extend([f"### M x K Matrix: {model_name}", "", _format_table(pivot.reset_index().rename(columns={"num_masks": "M"})), ""])
+        for study_name in sorted(successful["study_name"].dropna().unique()):
+            study_frame = successful[successful["study_name"] == study_name].copy()
+            lines.extend([f"## Study: {study_name}", ""])
+            _append_dataset_sections(lines, study_frame)
+    else:
+        _append_dataset_sections(lines, successful)
 
     output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
@@ -217,14 +294,34 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
     if successful.empty:
         return
 
+    if _has_multiple_studies(successful):
+        study_summary = (
+            successful.groupby("study_name")[["auc", "f1"]]
+            .mean()
+            .sort_values("auc", ascending=False)
+        )
+        if not study_summary.empty:
+            plt.figure(figsize=(9, 4))
+            study_summary["auc"].plot(kind="bar", color="#2f6db2")
+            plt.title("Mean AUC by Study")
+            plt.ylabel("AUC")
+            plt.tight_layout()
+            plt.savefig(plots_path / "study_auc_comparison.png")
+            plt.close()
+
+            plt.figure(figsize=(9, 4))
+            study_summary["f1"].plot(kind="bar", color="#b24c2f")
+            plt.title("Mean F1 by Study")
+            plt.ylabel("F1")
+            plt.tight_layout()
+            plt.savefig(plots_path / "study_f1_comparison.png")
+            plt.close()
+        return
+
     for dataset_name in sorted(successful["dataset"].dropna().unique()):
         dataset_frame = successful[successful["dataset"] == dataset_name]
 
-        model_summary = (
-            dataset_frame.groupby("llm_model")["auc"]
-            .mean()
-            .sort_values(ascending=False)
-        )
+        model_summary = dataset_frame.groupby("llm_model")["auc"].mean().sort_values(ascending=False)
         if not model_summary.empty:
             plt.figure(figsize=(8, 4))
             model_summary.plot(kind="bar", color="#2f6db2")
@@ -234,11 +331,7 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
             plt.savefig(plots_path / f"{dataset_name}_model_comparison.png")
             plt.close()
 
-        recall_auc = (
-            dataset_frame.groupby("llm_model")[["retrieval_recall", "auc"]]
-            .mean()
-            .reset_index()
-        )
+        recall_auc = dataset_frame.groupby("llm_model")[["retrieval_recall", "auc"]].mean().reset_index()
         if not recall_auc.empty:
             plt.figure(figsize=(6, 5))
             plt.scatter(recall_auc["retrieval_recall"], recall_auc["auc"], color="#b24c2f")

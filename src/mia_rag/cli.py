@@ -60,14 +60,23 @@ def process_results_cli(argv: list[str] | None = None) -> int:
                 "Retrieval Recall": "retrieval_recall",
             }
         )
+        dataframe["study_name"] = "legacy_import"
         dataframe["finished_at"] = dataframe.get("started_at", "")
         dataframe["status"] = dataframe.get("Error").fillna("").map(lambda value: "failed" if value else "success")
         dataframe["dataset_loader"] = ""
+        dataframe["model_provider"] = ""
+        dataframe["llm_model_name"] = dataframe.get("llm_model", "")
         dataframe["eval_size"] = ""
+        dataframe["gamma"] = ""
         dataframe["member_samples"] = 0
         dataframe["non_member_samples"] = 0
+        dataframe["accuracy"] = ""
+        dataframe["precision"] = ""
+        dataframe["recall"] = ""
+        dataframe["f1"] = ""
         dataframe["runtime_seconds"] = ""
         dataframe["failure_reason"] = dataframe.get("Error", "").fillna("")
+        dataframe["embedding_model_name"] = dataframe.get("embedding_model", "")
         dataframe["config_repr"] = ""
 
     csv_path, report_path, plots_path = _resolve_processing_output(input_path, args.output_dir, args.csv, args.report)

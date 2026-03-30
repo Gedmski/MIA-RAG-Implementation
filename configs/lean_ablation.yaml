@@ -1,0 +1,208 @@
+paths:
+  results_root: results
+  legacy_experiment_log: experiment_results.md
+  legacy_csv: experiment_data.csv
+  legacy_report: results_report.md
+
+datasets:
+  healthcaremagic:
+    loader: healthcaremagic
+    enabled: true
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    split: train
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    text_fields:
+      - text
+  msmarco:
+    loader: msmarco
+    enabled: true
+    dataset_id: ms_marco
+    dataset_config: v1.1
+    split: validation
+    streaming: true
+    index_size: 500
+    eval_size: 50
+    min_chars: 100
+    max_chars: 2500
+  nq:
+    loader: nq
+    enabled: true
+    dataset_id: LLukas22/nq-simplified
+    split: test
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+  fiqa:
+    loader: fiqa
+    enabled: true
+    dataset_id: BeIR/fiqa
+    dataset_config: corpus
+    split: corpus
+    index_size: 500
+    eval_size: 50
+    min_chars: 120
+    max_chars: 2500
+  arxiv:
+    loader: arxiv
+    enabled: true
+    dataset_id: MaartenGr/arxiv_nlp
+    split: train
+    category: Computation and Language
+    index_size: 500
+    eval_size: 50
+    min_chars: 120
+    max_chars: 2500
+    title_fields:
+      - Titles
+    abstract_fields:
+      - Abstracts
+    category_fields:
+      - Categories
+
+models:
+  gpt-4o-mini:
+    provider: openai
+    model_name: gpt-4o-mini
+  llama3:
+    provider: ollama
+    model_name: llama3
+  mistral:
+    provider: ollama
+    model_name: mistral
+  phi3:
+    provider: ollama
+    model_name: phi3
+
+retrievers:
+  faiss:
+    enabled: true
+  bm25:
+    enabled: true
+
+embeddings:
+  all-minilm-l6-v2:
+    provider: sentence_transformers
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+  bge-small-en-v1.5:
+    provider: huggingface
+    model_name: BAAI/bge-small-en-v1.5
+
+runtime:
+  proxy_model: gpt2
+  masking_strategy: hard
+  use_spelling_correction: true
+  seed: 42
+  gamma: 0.5
+  continue_on_error: true
+  limit_runs:
+  llm_temperature: 0.0
+
+reporting:
+  generate_plots: true
+  copy_legacy_outputs: true
+
+defaults:
+  dataset: healthcaremagic
+  model: gpt-4o-mini
+  retriever: faiss
+  embedding: bge-small-en-v1.5
+  num_masks: 10
+  retriever_k: 5
+  gamma: 0.5
+  seed: 42
+
+studies:
+  baseline_reproduction:
+    description: Single anchored baseline.
+    overrides: {}
+    sweep: {}
+
+  ablation_model_family:
+    description: Vary only the LLM family.
+    overrides: {}
+    sweep:
+      model:
+        - gpt-4o-mini
+        - llama3
+        - mistral
+        - phi3
+
+  ablation_mask_count:
+    description: Vary only mask count M.
+    overrides:
+      model: gpt-4o-mini
+    sweep:
+      num_masks:
+        - 3
+        - 5
+        - 10
+        - 15
+        - 20
+
+  ablation_gamma:
+    description: Vary only gamma threshold.
+    overrides:
+      model: gpt-4o-mini
+    sweep:
+      gamma:
+        - 0.3
+        - 0.5
+        - 0.7
+        - 0.9
+
+  ablation_retrieval_depth:
+    description: Vary only top-K retrieval depth.
+    overrides:
+      model: gpt-4o-mini
+    sweep:
+      retriever_k:
+        - 1
+        - 3
+        - 5
+        - 10
+
+  ablation_retrieval_stack:
+    description: Vary retriever and embedding.
+    overrides:
+      model: gpt-4o-mini
+    sweep:
+      retriever:
+        - faiss
+        - bm25
+      embedding:
+        - bge-small-en-v1.5
+        - all-minilm-l6-v2
+
+  robustness_cross_dataset:
+    description: Check whether results hold across the core datasets.
+    overrides:
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+    sweep:
+      dataset:
+        - healthcaremagic
+        - msmarco
+        - nq
+        - fiqa
+        - arxiv
+      model:
+        - gpt-4o-mini
+        - llama3
+
+  optional_scale_study:
+    description: Optional index-size and seed sensitivity.
+    overrides:
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+    sweep:
+      index_size:
+        - 500
+        - 2000
+      seed:
+        - 42
+        - 1337
