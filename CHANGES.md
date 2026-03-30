@@ -1,454 +1,695 @@
-# Product Requirements Document (PRD)
-## MBA Ablation Study Expansion for Local RAG Privacy Evaluation
+# PRD: Lean Ablation Study YAML Configuration for MBA-on-RAG
 
-## 1. Executive Summary
-This PRD defines the next iteration of the Mask-Based Membership Inference Attack (MBA) study for local Retrieval-Augmented Generation (RAG) systems. The current reproduction is technically successful, but the experimental design needs to be strengthened to address reviewer concerns around dataset novelty, limited ablation depth, weak reporting structure, and insufficient explanation of why local models outperform the original paper’s stronger API-based setup. These concerns are explicitly reflected in the project report comments, including the need for new datasets, broader values for **M** and **K**, dataset-specific reporting instead of global averages, and a clearer explanation of the “AUC paradox.” fileciteturn0file0L111-L127 fileciteturn0file0L151-L170
+## 1. Objective
 
-The revised study will reposition the work from a narrow reproduction into a stronger, more defensible privacy evaluation of local RAG systems. The updated scope emphasizes domain generalization, expanded ablations, better result aggregation, and a clearer framing of MBA as a practical leakage-assessment methodology for proprietary AI systems. This direction aligns with the report’s feedback to treat MBA and similar attacks as a privacy or sanitization test for deployed RAG products rather than only as a benchmark replication. fileciteturn0file0L226-L231
+Create a **lean, publication-defensible experiment configuration** for the MBA-on-RAG project that:
 
----
-
-## 2. Problem Statement
-The current implementation proves that a local RAG pipeline can be vulnerable to membership leakage, but the study in its present form is still too close to the reference paper in several important ways:
-
-1. **Dataset overlap with the original paper is too high.** The current study uses HealthCareMagic, MS MARCO, and Natural Questions, which reduces novelty and weakens claims about generalization across domains. This concern is explicitly flagged in the report comments. fileciteturn0file0L111-L127
-2. **The ablation grid is too shallow.** The current values for mask count (**M = 5, 10, 15**) and retrieval depth (**K = 3, 5**) are not enough to characterize where the attack breaks down or where context noise begins to function as a defense. This limitation is also directly noted in the comments on the result sections and figures. fileciteturn0file0L165-L210
-3. **Result aggregation is misleading.** Reporting means across all datasets and configurations hides dataset-specific behavior and is not standard reporting practice. The comments explicitly request reporting by dataset rather than global averages. fileciteturn0file0L151-L170
-4. **The explanation for unusually strong local AUC is underdeveloped.** The current report claims that local models like Llama 3 outperform the original paper’s GPT-4o-mini setup, but this requires tighter analysis tied to implementation choices such as strict reconstruction parsing, fragmented word extraction, spelling correction, and closed-world retrieval behavior. fileciteturn0file0L151-L182
-5. **Some analysis sections are weak or not sufficiently justified.** In particular, the embedding/retriever synergy section is less compelling if the dataset setup remains too similar to the original paper, and the M/K analysis is currently too simple. fileciteturn0file0L183-L210
+1. avoids a wasteful full Cartesian sweep,
+2. isolates major factors cleanly,
+3. includes a **GPT model** for comparison since experiments will run on a VM,
+4. extends the study with **new datasets** and **new hyperparameters** not properly addressed in the current write-up,
+5. remains compatible with the repo’s YAML-driven experiment runner. 
 
 ---
 
-## 3. Project Goal
-Upgrade the MBA study into a stronger academic and engineering artifact that:
+## 2. Problem
 
-- demonstrates privacy leakage across more diverse domains,
-- characterizes attack behavior over a substantially wider hyperparameter space,
-- reports results at the dataset level rather than through collapsed averages,
-- explains why local RAG setups can produce very high AUC under constrained retrieval conditions,
-- and reframes the work as a reusable privacy evaluation methodology for proprietary RAG deployments.
+The current experimental setup risks turning the study into a **massive combinatorial sweep** instead of a proper ablation study.
 
----
+A full sweep across:
 
-## 4. Primary Objectives
+* datasets,
+* models,
+* retrievers,
+* embeddings,
+* `M`,
+* `K`,
+* and possibly `γ`, seeds, or sample-size variants
 
-### 4.1 Scientific Objectives
-- Validate whether MBA remains effective outside the original paper’s dataset trio.
-- Measure how domain-specific vocabulary, formatting structure, and semantic rigidity affect leakage.
-- Identify the degradation curve of attack success as masking intensity and retrieval depth change.
-- Separate **retrieval success** from **generator compliance** as independent factors in attack effectiveness.
+can explode into thousands of runs. That is expensive and also weakens interpretability because too many factors vary at once.
 
-### 4.2 Engineering Objectives
-- Refactor the pipeline to support plug-in dataset loaders and larger experimental sweeps.
-- Run the expanded grid reliably on the available GPU VM without out-of-memory failures.
-- Produce reproducible, dataset-specific reports, plots, and tables automatically.
-- Make the result-processing pipeline publication-ready.
+The original MBA paper did not just vary everything blindly. It had:
 
-### 4.3 Framing Objectives
-- Position MBA as a **RAG privacy stress test** or **sanitization benchmark** that a company could run against its own retrieval system before deployment. This explicitly follows the future-work suggestion in the report comments. fileciteturn0file0L226-L231
+* a main setup,
+* ablation baselines,
+* parameter studies for `M` and `γ`,
+* and a note that the method is relatively insensitive to `K` in their setup. 
+
+This PRD defines a **lean experimental plan** that preserves scientific value while drastically reducing runtime.
 
 ---
 
-## 5. Scope
+## 3. Goals
 
-### In Scope
-- Adding new datasets from domains not used in the original paper
-- Expanding the search space for **M** and **K**
-- Reworking result aggregation and markdown reporting
-- Producing dataset-specific matrices, tables, and curves
-- Tightening the analysis around retrieval recall, generator behavior, and AUC interpretation
-- Improving the final narrative so the work reads as a privacy evaluation framework, not just a reproduction
+### Primary goals
 
-### Out of Scope
-- Building a full defense mechanism in this phase
-- Evaluating commercial closed-source APIs beyond discussion/benchmark comparison
-- Scaling beyond the controlled 500-document index unless time remains after the main ablation grid
-- Replacing the entire MBA framework with a different attack family
+* Produce a YAML config structure for **staged ablations**, not a monolithic full sweep.
+* Add **GPT-4o-mini** as an evaluation model to compare with local models, since the original paper used it as the main black-box LLM. 
+* Include **new datasets** beyond the original three, which your repo already supports through YAML defaults such as **FiQA** and **ArXiv**. 
+* Add underexplored hyperparameters and system variables.
 
----
+### Secondary goals
 
-## 6. Reviewer-Driven Requirements
-This PRD is directly shaped by the report comments and must satisfy the following reviewer-driven requirements:
+* Keep runtime manageable.
+* Improve paper defensibility by clearly separating:
 
-### R1. Replace or augment the current datasets
-The study must stop depending solely on HealthCareMagic, MS MARCO, and Natural Questions. At least two new domains must be added so that the work demonstrates genuine domain generalization. fileciteturn0file0L111-L127
-
-### R2. Expand the hyperparameter study
-The attack analysis must include more values for **M** and **K** so the study can reveal failure points, degradation slopes, and distractor effects more convincingly. fileciteturn0file0L165-L210
-
-### R3. Report results by dataset
-All summary tables and plots must be dataset-specific. Global averages across datasets must be deprecated or clearly secondary. fileciteturn0file0L151-L170
-
-### R4. Better justify unexpectedly strong local performance
-The report must clearly explain why local models can yield very high AUC despite being weaker than GPT-4o-mini overall, including the role of implementation refinements and closed-world retrieval. fileciteturn0file0L151-L182
-
-### R5. Improve or remove weak subsections
-Sections such as embedding/retriever synergy should only remain if supported by the new dataset design and stronger analysis. Weak sections should be reworked rather than kept for completeness. fileciteturn0file0L183-L193
+  * baseline reproduction,
+  * lean ablations,
+  * robustness checks,
+  * optional extended sweeps.
 
 ---
 
-## 7. Updated Experimental Design
+## 4. Non-goals
 
-## 7.1 Dataset Strategy
-The revised study must include domains that are structurally different from the original paper’s corpora.
-
-### Required New Domains
-#### A. Financial / Legal Domain
-Candidate datasets:
-- **FiQA** for finance-oriented question-answer or passage retrieval
-- **LexGLUE-derived text subsets** for legal language
-- other compact finance/legal corpora that can be normalized into a 500-document retrieval index
-
-**Purpose:** These datasets contain rigid, specialized vocabulary and may produce stronger or weaker leakage depending on term specificity and phrasing regularity.
-
-#### B. Academic / Technical Domain
-Candidate datasets:
-- **ArXiv abstracts** from a focused subject area
-- **technical documentation corpora** such as framework or library documentation
-- curated domain docs with structured headings, code-adjacent terminology, and repeated technical jargon
-
-**Purpose:** These datasets test whether MBA behaves differently when documents are concise, template-like, and structurally repetitive.
-
-### Optional Retained Domains
-The original datasets may still be kept as comparison baselines, but they must no longer dominate the narrative. If retained, they should be framed as **reference baselines** rather than the core novelty.
-
-### Dataset Constraints
-Each dataset must be transformed into a uniform experimental format:
-- fixed index size target: **500 documents** per dataset for the main controlled comparison,
-- consistent cleaning and chunking rules,
-- comparable member/non-member split strategy,
-- standardized document length filters,
-- consistent masking and evaluation protocol.
-
-### Acceptance Criteria
-- At least **2 new datasets** added and fully integrated.
-- All datasets produce clean member/non-member evaluation sets.
-- Preprocessing is documented and reproducible.
+* This config is **not** meant to exhaust every possible combination.
+* This config is **not** a benchmark leaderboard script.
+* This config is **not** intended to reproduce every appendix result from the paper.
 
 ---
 
-## 7.2 Hyperparameter Grid Expansion
-The ablation study must move from a shallow comparison to a proper sensitivity analysis.
+## 5. Research framing
 
-### Mask Count (M)
-Current grid is too narrow. The revised grid will be:
+The original paper’s key tunable variables include:
 
-```text
-M ∈ {1, 3, 5, 7, 10, 15, 20}
+* **number of masks `M`**,
+* **membership threshold `γ`**,
+* **retrieval depth `K`** as a system parameter,
+* model/retrieval/embedding choices,
+* and dataset choice. 
+
+Your revised study should frame the experiments as:
+
+1. **Baseline reproduction**
+2. **Lean factor-isolation ablations**
+3. **Cross-dataset robustness validation**
+4. **Model-family comparison including GPT**
+
+That makes the study much cleaner than “everything crossed with everything.”
+
+---
+
+## 6. Lean ablation design
+
+## 6.1 Baseline configuration
+
+Define one fixed baseline:
+
+* dataset: `healthcaremagic`
+* model: `gpt-4o-mini`
+* retriever: `faiss`
+* embedding: `bge-small-en-v1.5`
+* `M = 10`
+* `K = 5`
+* `γ = 0.5`
+* index size: fixed
+* evaluation size: fixed
+* seed: fixed
+
+Why:
+
+* `gpt-4o-mini` matters because the original paper used it as the main black-box LLM. 
+* `M = 10` is inside the original paper’s strong operating region. They found performance was generally good when `M` was between 5 and 15. 
+* `γ = 0.5` is a reasonable anchor since the paper found performance fairly stable around 0.5–0.7. 
+* `K = 5` is more practical than `K = 10` for your lean study and lets you test distractor sensitivity.
+
+---
+
+## 6.2 Core lean ablations
+
+### Ablation A — LLM family
+
+Hold everything fixed except model.
+
+Models:
+
+* `gpt-4o-mini`
+* `llama3`
+* `mistral`
+* `phi3`
+
+Purpose:
+
+* compare hosted GPT vs local open models,
+* test whether instruction-following drives attack success more than raw retrieval,
+* directly answer reviewer criticism around missing GPT comparison.
+
+### Ablation B — mask count `M`
+
+Hold everything fixed except `M`.
+
+Values:
+
+* `M ∈ {3, 5, 10, 15, 20}`
+
+Why expand:
+
+* the original paper used `{5,10,15,20}`. 
+* adding `3` helps test low-mask instability and error tolerance.
+
+### Ablation C — threshold `γ`
+
+Hold everything fixed except `γ`.
+
+Values:
+
+* `γ ∈ {0.3, 0.5, 0.7, 0.9}`
+
+Why:
+
+* the original paper tuned `γ` from 0.1 to 1.0 and concluded performance is relatively stable around 0.5–0.7. 
+* a lean study does not need 10 threshold values.
+
+### Ablation D — retrieval depth `K`
+
+Hold everything fixed except `K`.
+
+Values:
+
+* `K ∈ {1, 3, 5, 10}`
+
+Why:
+
+* the paper discussed `K` as important but did not foreground it in the main study. 
+* `K=1` and `K=3` test low-noise retrieval,
+* `K=10` aligns with the original main setup.
+
+### Ablation E — retriever/embedding stack
+
+Hold model and dataset fixed, vary retrieval stack.
+
+Retrievers:
+
+* `faiss`
+* `bm25`
+
+Embeddings:
+
+* `bge-small-en-v1.5`
+* `all-minilm-l6-v2`
+
+Purpose:
+
+* isolate dense vs sparse retrieval,
+* test whether embedding choice affects leakage signal.
+
+---
+
+## 6.3 Cross-dataset robustness set
+
+Use a **reduced model set**, not all models.
+
+Datasets:
+
+* `healthcaremagic`
+* `msmarco`
+* `nq`
+* `fiqa`
+* `arxiv`
+
+Why:
+
+* the original paper only used three QA datasets: HealthCareMagic-100k, MS-MARCO, and NQ-simplified. 
+* your repo already supports **FiQA** and **ArXiv**, which are strong additions:
+
+  * **FiQA** gives financial-domain text
+  * **ArXiv** gives scientific/technical abstracts 
+
+Recommended robustness models:
+
+* `gpt-4o-mini`
+* `llama3`
+
+That is enough. No need to drag Phi-3 through every dataset if it underperforms badly.
+
+---
+
+## 7. Proposed new hyperparameters and factors not properly addressed
+
+These are the ones worth adding.
+
+## 7.1 Seeds / repeated trials
+
+Add:
+
+* `seed ∈ {42, 1337, 2026}`
+
+Why:
+
+* current results may be too dependent on one sample split or retrieval index state.
+* this makes the study more defensible.
+
+## 7.2 Index size
+
+Add:
+
+* `index_size ∈ {500, 2000, 10000}`
+
+Why:
+
+* your current setup seems small and may artificially inflate recall and AUC.
+* the original paper used much larger datasets and training/testing splits than a tiny local sample. 
+* this addresses “closed-world toy index” criticism.
+
+## 7.3 Evaluation set size
+
+Add:
+
+* `eval_members = eval_non_members ∈ {50, 100, 250}`
+
+Why:
+
+* tiny evaluation samples make metrics noisy.
+* lets you measure stability vs cost.
+
+## 7.4 Chunking strategy
+
+Add:
+
+* `chunk_size ∈ {none, 256, 512}`
+* `chunk_overlap ∈ {0, 32, 64}`
+
+Why:
+
+* real RAG systems are chunked.
+* chunking strongly affects whether the full target evidence survives retrieval.
+
+## 7.5 Retriever search type / ANN params
+
+For FAISS/HNSW:
+
+* `faiss_metric ∈ {inner_product, cosine}`
+* `hnsw_ef_search ∈ {32, 64, 128}`
+
+Why:
+
+* the original paper used HNSW in FAISS with inner product. 
+* search aggressiveness can alter recall and downstream attack success.
+
+## 7.6 Prompt strictness
+
+Add:
+
+* `prompt_variant ∈ {strict_format, strict_format_with_examples, concise}`
+
+Why:
+
+* instruction adherence is a major driver of attack success.
+* this is especially relevant for comparing GPT vs local models.
+
+## 7.7 Proxy language model
+
+Add:
+
+* `proxy_model ∈ {gpt2-xl, gpt2-large}`
+
+Why:
+
+* the original paper used `gpt2-xl` as the proxy LM. 
+* checking a smaller proxy can show whether proxy capacity materially affects mask selection quality.
+
+## 7.8 Mask selection policy
+
+Add:
+
+* `mask_policy ∈ {proxy_ranked, random, llm_generated, proxy_ranked_no_spell_correct}`
+
+Why:
+
+* this mirrors the original ablation logic more closely. The paper explicitly compared random masking, LLM-based masking, proxy-LM-only, and no spelling-correction variants. 
+
+## 7.9 Membership decision rule
+
+Add:
+
+* `decision_rule ∈ {threshold_gamma, raw_mask_accuracy_auc_only}`
+
+Why:
+
+* useful if your paper increasingly focuses on ROC AUC rather than thresholded binary classification.
+
+---
+
+## 8. Required YAML behavior
+
+The config system should support:
+
+* fixed **baseline defaults**
+* named **study blocks**
+* optional per-study overrides
+* avoidance of accidental full cross-products across unrelated dimensions
+
+The repo already expects YAML sections such as:
+
+* `paths`
+* `datasets`
+* `models`
+* `retrievers`
+* `embeddings`
+* `sweeps`
+* `runtime`
+* `reporting` 
+
+This PRD recommends adding:
+
+* `studies`
+* `defaults`
+* `overrides`
+
+so you can define **separate ablation batches** cleanly.
+
+---
+
+## 9. YAML output requirements
+
+The YAML should generate the following study groups:
+
+1. `baseline_reproduction`
+2. `ablation_model_family`
+3. `ablation_mask_count`
+4. `ablation_gamma`
+5. `ablation_retrieval_depth`
+6. `ablation_retrieval_stack`
+7. `robustness_cross_dataset`
+8. `optional_scale_study`
+
+Each study should:
+
+* fix most parameters,
+* vary only one main factor,
+* write outputs to a separate results subdirectory.
+
+---
+
+## 10. Success criteria
+
+The YAML config is successful if it:
+
+* runs as multiple **small targeted studies**
+* includes **GPT-4o-mini**
+* includes **FiQA** and **ArXiv**
+* reduces total runs massively compared to a full sweep
+* produces cleaner tables and plots for the paper
+
+Target total:
+
+* **core lean plan:** about **40–100 runs**
+* **with robustness:** about **100–180 runs**
+* **optional scale study:** extra, only if needed
+
+---
+
+# Proposed Lean YAML Configuration
+
+```yaml
+paths:
+  results_root: results
+  cache_root: cache
+  datasets_root: data
+
+defaults:
+  dataset: healthcaremagic
+  model: gpt-4o-mini
+  retriever: faiss
+  embedding: bge-small-en-v1.5
+  mask_count: 10
+  gamma: 0.5
+  retrieval_k: 5
+  seed: 42
+  index_size: 500
+  eval_members: 100
+  eval_non_members: 100
+  chunk_size: none
+  chunk_overlap: 0
+  prompt_variant: strict_format
+  proxy_model: gpt2-xl
+  mask_policy: proxy_ranked
+  faiss_metric: inner_product
+  hnsw_ef_search: 64
+
+datasets:
+  healthcaremagic:
+    enabled: true
+    loader: healthcaremagic
+    source: default
+  msmarco:
+    enabled: true
+    loader: msmarco
+    source: default
+  nq:
+    enabled: true
+    loader: nq
+    source: default
+  fiqa:
+    enabled: true
+    loader: fiqa
+    source: default
+  arxiv:
+    enabled: true
+    loader: arxiv
+    source: default
+
+models:
+  gpt-4o-mini:
+    provider: openai
+    model_name: gpt-4o-mini
+    api_mode: chat
+    enabled: true
+  llama3:
+    provider: ollama
+    model_name: llama3
+    enabled: true
+  mistral:
+    provider: ollama
+    model_name: mistral
+    enabled: true
+  phi3:
+    provider: ollama
+    model_name: phi3
+    enabled: true
+
+retrievers:
+  faiss:
+    type: dense
+    ann_backend: faiss
+    enabled: true
+  bm25:
+    type: sparse
+    enabled: true
+
+embeddings:
+  bge-small-en-v1.5:
+    provider: huggingface
+    model_name: BAAI/bge-small-en-v1.5
+    enabled: true
+  all-minilm-l6-v2:
+    provider: sentence_transformers
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+    enabled: true
+
+runtime:
+  max_parallel_runs: 2
+  retry_failed_runs: true
+  save_retrieved_docs: true
+  save_raw_llm_outputs: true
+  deterministic: true
+
+reporting:
+  save_jsonl: true
+  save_summary_csv: true
+  save_markdown_report: true
+  save_plots: true
+  primary_metric: roc_auc
+  secondary_metrics:
+    - mask_accuracy
+    - f1
+    - retrieval_recall
+
+studies:
+  baseline_reproduction:
+    description: "Single anchored baseline using GPT-4o-mini and HealthcareMagic."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      gamma: 0.5
+      retrieval_k: 5
+      seed: 42
+    sweep: {}
+
+  ablation_model_family:
+    description: "Vary only the LLM family."
+    overrides:
+      dataset: healthcaremagic
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      gamma: 0.5
+      retrieval_k: 5
+    sweep:
+      model:
+        - gpt-4o-mini
+        - llama3
+        - mistral
+        - phi3
+
+  ablation_mask_count:
+    description: "Vary only mask count M."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      gamma: 0.5
+      retrieval_k: 5
+    sweep:
+      mask_count:
+        - 3
+        - 5
+        - 10
+        - 15
+        - 20
+
+  ablation_gamma:
+    description: "Vary only membership threshold gamma."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      retrieval_k: 5
+    sweep:
+      gamma:
+        - 0.3
+        - 0.5
+        - 0.7
+        - 0.9
+
+  ablation_retrieval_depth:
+    description: "Vary only top-K retrieval depth."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      gamma: 0.5
+    sweep:
+      retrieval_k:
+        - 1
+        - 3
+        - 5
+        - 10
+
+  ablation_retrieval_stack:
+    description: "Vary retriever and embedding with model fixed."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      mask_count: 10
+      gamma: 0.5
+      retrieval_k: 5
+    sweep:
+      retriever:
+        - faiss
+        - bm25
+      embedding:
+        - bge-small-en-v1.5
+        - all-minilm-l6-v2
+
+  robustness_cross_dataset:
+    description: "Check whether main findings hold across datasets using only top models."
+    overrides:
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      gamma: 0.5
+      retrieval_k: 5
+    sweep:
+      dataset:
+        - healthcaremagic
+        - msmarco
+        - nq
+        - fiqa
+        - arxiv
+      model:
+        - gpt-4o-mini
+        - llama3
+
+  optional_scale_study:
+    description: "Optional study for index-size sensitivity."
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      mask_count: 10
+      gamma: 0.5
+      retrieval_k: 5
+    sweep:
+      index_size:
+        - 500
+        - 2000
+        - 10000
+      seed:
+        - 42
+        - 1337
 ```
 
-**Reason:** This allows the study to observe:
-- low-mask signal quality,
-- mid-range sweet spots,
-- and high-mask context destruction.
+---
 
-### Retrieval Depth (K)
-The revised grid will be:
+# Recommended next extensions
 
-```text
-K ∈ {1, 3, 5, 10, 15}
-```
+## Strongest additions
 
-**Reason:** This enables analysis of:
-- single-document retrieval,
-- moderate distractor exposure,
-- and extreme noise conditions where extra retrieved context may weaken reconstruction.
+If you want the best paper upgrade for lowest extra cost, add these first:
 
-### Optional Secondary Sweeps
-If compute allows, add:
-- different index sizes, e.g. **N ∈ {500, 1000}**,
-- different mask-selection heuristics,
-- different query construction variants,
-- threshold sensitivity for the BMIC decision stage.
+1. **GPT-4o-mini**
+2. **FiQA**
+3. **ArXiv**
+4. **`γ` ablation**
+5. **index-size sensitivity**
+6. **3 seeds for only the strongest studies**
 
-These are optional and only start after the main M/K expansion is complete.
+## Nice-to-have additions
 
-### Acceptance Criteria
-- Full M/K grid runs successfully for all required datasets and core model/retriever combinations.
-- No silent skipping of failed runs.
-- All failures are logged with clear reasons.
+After that:
+
+* chunking study
+* prompt-format strictness study
+* proxy-model study
+* mask-policy study
 
 ---
 
-## 7.3 Core Experimental Matrix
-The base experiment matrix should remain manageable but strong enough for analysis.
+# Clean experiment roadmap
 
-### Models
-- Llama 3
-- Mistral
-- Phi-3
+## Phase 1 — sanity
 
-### Retrievers
-- FAISS (dense)
-- BM25 (sparse)
+Run:
 
-### Embeddings
-- all-MiniLM-L6-v2
-- bge-small-en-v1.5
+* `baseline_reproduction`
 
-### Controlled Settings
-- Index size: 500 documents
-- Evaluation set: 50 members / 50 non-members per dataset, unless a dataset requires a justified modification
+## Phase 2 — core ablation
 
-### Priority Order
-1. Llama 3 across all datasets and expanded M/K
-2. Mistral across all datasets and expanded M/K
-3. Phi-3 where feasible, especially to analyze generator compliance failure
-4. Retriever/embedding comparisons once the dataset-generalization story is strong enough to justify them
+Run:
 
----
+* `ablation_model_family`
+* `ablation_mask_count`
+* `ablation_gamma`
+* `ablation_retrieval_depth`
 
-## 8. Reporting and Analytics Requirements
+## Phase 3 — robustness
 
-## 8.1 Aggregation Rules
-The global “Average AUC” must no longer be the main reporting unit. The result-processing pipeline must enforce the following hierarchy:
+Run:
 
-1. **Dataset-level reporting first**
-2. Within dataset: model comparisons
-3. Within dataset: retriever and embedding comparisons
-4. Within dataset: M/K sensitivity analysis
-5. Global averages only as supplementary appendix summaries, if included at all
+* `robustness_cross_dataset`
 
-This directly addresses the report comment that averaging across datasets and configurations is not standard practice and hides meaningful behavior. fileciteturn0file0L151-L170
+## Phase 4 — optional scale
 
-## 8.2 Required Output Tables
-For each dataset, automatically generate:
+Run:
 
-- **Table A:** AUC by model
-- **Table B:** Retrieval recall by model
-- **Table C:** AUC matrix for M × K
-- **Table D:** Best and worst configurations
-- **Table E:** Retriever × embedding comparison
-
-## 8.3 Required Plots
-For each dataset, generate:
-
-- line plot: AUC vs. M for fixed K values
-- line plot: AUC vs. K for fixed M values
-- heatmap: M × K AUC matrix
-- bar chart: model comparison
-- optional bar chart: retrieval recall vs. attack AUC
-
-## 8.4 Required Narrative Analysis
-The report must answer these questions for each dataset:
-
-1. Does the attack remain effective in this domain?
-2. Which model leaks the most and why?
-3. Does increased retrieval depth help or hurt leakage?
-4. At what mask count does context destruction begin?
-5. Is retrieval the bottleneck, or is generator compliance the bottleneck?
-6. Does embedding/retriever choice materially matter in this domain?
-
----
-
-## 9. AUC Paradox Analysis Requirement
-A dedicated subsection must be added to explain why local models can produce stronger AUC than the original paper’s GPT-4o-mini setup, despite being weaker general-purpose models.
-
-### Required Explanatory Factors
-The analysis must explicitly discuss:
-
-#### 1. Fragmented Word Extraction
-If the masking pipeline reconstructs fragmented words more faithfully than the original setup, this can reduce false negatives and improve AUC.
-
-#### 2. Spelling Correction / Parsing Robustness
-If the scoring pipeline tolerates formatting variation or spelling correction better, the local pipeline may receive cleaner reconstruction signals.
-
-#### 3. Closed-World Retrieval Conditions
-The report already states that a 500-document index yielded effectively perfect retrieval recall. This must be reframed as a major reason for the inflated attack performance: the problem becomes less about finding the document and more about whether the generator can copy or reconstruct from it. fileciteturn0file0L173-L182
-
-#### 4. Generator Compliance vs. Model Size
-The Phi-3 result already suggests that strong attack performance depends heavily on instruction-following fidelity rather than raw model capability. This point should be expanded and supported with examples or failure counts. fileciteturn0file0L173-L182
-
-### Acceptance Criteria
-- The final report contains a standalone subsection on this paradox.
-- The explanation is backed by both metric evidence and concrete implementation behavior.
-
----
-
-## 10. Codebase Refactoring Requirements
-
-## 10.1 `mia_rag_attack.py`
-### Required Changes
-- Add modular dataset loader interfaces.
-- Add preprocessing hooks for dataset-specific normalization.
-- Replace hardcoded dataset assumptions with configuration-driven dataset selection.
-- Expand config schema to accept iterable M and K lists.
-- Add better logging for per-run metadata:
-  - dataset
-  - model
-  - retriever
-  - embedding
-  - M
-  - K
-  - recall
-  - AUC
-  - runtime
-  - failure reason if any
-- Add GPU-conscious batching or staged execution where possible.
-
-### Nice to Have
-- resumable experiment execution,
-- cached intermediate outputs,
-- batched evaluation for repeated query/model settings.
-
-## 10.2 `process_results.py`
-### Required Changes
-- Remove or downgrade global average metrics.
-- Group results by dataset before all other summaries.
-- Generate dataset-specific markdown sections automatically.
-- Output M × K matrices per dataset.
-- Output best/worst configuration tables per dataset.
-- Validate missing values and incomplete runs before report generation.
-
-### Nice to Have
-- export CSV + Markdown + JSON summary bundles,
-- produce publication-ready plot images automatically.
-
----
-
-## 11. Functional Requirements
-
-### FR1. Dataset Loader Abstraction
-The system shall support adding a new dataset through a dedicated loader without modifying core attack logic.
-
-### FR2. Configurable Experimental Sweeps
-The system shall allow M and K to be passed as configurable lists from a single experiment config.
-
-### FR3. Dataset-First Reporting
-The system shall group all outputs by dataset before any cross-dataset comparison.
-
-### FR4. Automatic Matrix Generation
-The system shall generate M × K result matrices for every dataset-model combination.
-
-### FR5. Failure Logging
-The system shall log OOMs, parse failures, retrieval failures, and generation-format failures explicitly.
-
-### FR6. Reproducible Exports
-The system shall save raw run results and processed summaries in reproducible machine-readable formats.
-
----
-
-## 12. Non-Functional Requirements
-
-### NFR1. Reproducibility
-Every experimental run must be traceable through config files, fixed seeds where possible, and exported metadata.
-
-### NFR2. Scalability
-The pipeline must support larger sweeps on the GPU VM without requiring major code changes.
-
-### NFR3. Robustness
-The result processor must not fail silently when partial runs are missing.
-
-### NFR4. Clarity
-The generated markdown report must be readable enough to directly support the final paper-writing stage.
-
----
-
-## 13. Risks and Mitigations
-
-### Risk 1: GPU OOM during expanded grid
-**Mitigation:** add batched execution, sequential scheduling, optional reduced concurrency, and resumable run checkpoints.
-
-### Risk 2: New datasets break preprocessing assumptions
-**Mitigation:** introduce dataset validation scripts and document-length checks before running the full experiment.
-
-### Risk 3: Report becomes too broad
-**Mitigation:** prioritize dataset generalization, M/K ablation, and AUC explanation first. Secondary analyses only stay if they are strong enough.
-
-### Risk 4: Embedding/retriever analysis remains weak
-**Mitigation:** keep this section only if the new datasets reveal meaningful cross-domain differences. Otherwise shrink it or move it to an appendix.
-
----
-
-## 14. Success Metrics
-The update is considered successful when all of the following are true:
-
-### Experimental Success
-- Expanded M/K grid completes for the required datasets and core models.
-- No critical OOM failures block the main comparison matrix.
-- At least 2 new datasets are fully integrated and evaluated.
-
-### Reporting Success
-- `results_report.md` is grouped by dataset.
-- M × K matrices are generated for each dataset.
-- Curves clearly show where the attack strengthens, plateaus, and degrades.
-- Global average AUC is no longer the main headline metric.
-
-### Research Success
-- The revised report clearly explains the local AUC paradox.
-- The study demonstrates domain-dependent leakage behavior.
-- The work reads as a stronger privacy-evaluation framework, not just a reproduction.
-
----
-
-## 15. Phased Implementation Roadmap
-
-## Phase 1 — Refactor Foundation
-- modularize dataset loading
-- expand config schema for M/K sweeps
-- clean result logging format
-- verify current datasets still run end-to-end
-
-## Phase 2 — Add New Datasets
-- integrate financial/legal dataset
-- integrate academic/technical dataset
-- normalize preprocessing and document count
-- validate member/non-member split construction
-
-## Phase 3 — Run Main Ablation Grid
-- run priority experiments with Llama 3 first
-- expand to Mistral and Phi-3
-- monitor runtime, memory, and failure cases
-- cache and checkpoint outputs
-
-## Phase 4 — Rebuild Reporting Pipeline
-- dataset-first aggregation
-- M × K heatmaps and markdown tables
-- best/worst configuration summaries
-- retrieval vs. generation bottleneck analysis
-
-## Phase 5 — Final Analysis and Write-Up
-- write AUC paradox subsection
-- tighten discussion on domain effects
-- decide whether embedding/retriever synergy stays in main body
-- frame the overall work as RAG privacy stress testing
-
----
-
-## 16. Immediate Action Checklist
-
-### Code
-- [ ] Refactor `MIAConfig` to accept list-based M and K values
-- [ ] Add dataset loader interface
-- [ ] Implement first new dataset loader
-- [ ] Implement second new dataset loader
-- [ ] Add structured logging for every run
-
-### Experiments
-- [ ] Validate one mini-run for each new dataset
-- [ ] Run Llama 3 on the expanded M/K grid first
-- [ ] Check VRAM usage and runtime profile
-- [ ] Add resume/checkpoint support if needed
-
-### Reporting
-- [ ] Remove primary dependence on global mean AUC
-- [ ] Build dataset-specific summary tables
-- [ ] Generate M × K heatmaps
-- [ ] Draft the AUC paradox explanation section
-- [ ] Reframe conclusion toward privacy auditing / sanitization testing
-
----
-
-## 17. Final Deliverables
-- Updated experimental codebase
-- New dataset loader modules
-- Expanded raw result files
-- Revised `process_results.py`
-- Dataset-specific `results_report.md`
-- Plot bundle for M/K sensitivity and model comparisons
-- Updated paper sections aligned with reviewer comments
-
----
-
-## 18. Final Positioning Statement
-This expanded study should no longer present itself as only a reproduction of Liu et al. Instead, it should present itself as a controlled, local, reproducible privacy evaluation framework for RAG systems. The core value is not just showing that MBA works, but showing **when**, **why**, and **under what domain and system conditions** it becomes most dangerous for proprietary knowledge bases. That framing is the strongest way to answer the report feedback and make the project more defensible academically and more useful practically. fileciteturn0file0L226-L231
+* `optional_scale_study`

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import gc
+import os
 import re
 import time
 from typing import Any
@@ -143,6 +144,67 @@ class MaskGenerator:
         return " ".join(masked_words), ground_truth
 
 
+class OpenAIChatAdapter:
+    def __init__(self, model_name: str, temperature: float):
+        if not os.getenv("OPENAI_API_KEY"):
+            raise RuntimeError("OPENAI_API_KEY is required to run OpenAI-backed study configs.")
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise ImportError("openai is required to run OpenAI-backed study configs.") from exc
+
+        self.client = OpenAI()
+        self.model_name = model_name
+        self.temperature = temperature
+
+    def invoke(self, prompt: str) -> str:
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            temperature=self.temperature,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        message = response.choices[0].message.content
+        return message if isinstance(message, str) else ""
+
+
+def build_llm(config: MIAConfig):
+    provider = config.model_provider.lower()
+    if provider == "openai":
+        return OpenAIChatAdapter(model_name=config.llm_model_name, temperature=config.llm_temperature)
+
+    if provider == "ollama":
+        try:
+            from langchain_ollama import OllamaLLM
+        except ImportError:
+            try:
+                from langchain_community.llms import Ollama as OllamaLLM
+            except ImportError as exc:
+                raise ImportError("langchain-ollama or langchain-community is required for Ollama models.") from exc
+        return OllamaLLM(model=config.llm_model_name, temperature=config.llm_temperature)
+
+    raise ValueError(f"Unsupported model provider '{config.model_provider}'")
+
+
+def compute_membership_metrics(y_true: list[int], y_scores: list[float], gamma: float) -> dict[str, float]:
+    from sklearn.metrics import accuracy_score, precision_recall_fscore_support, roc_auc_score
+
+    y_pred = [1 if score >= gamma else 0 for score in y_scores]
+    precision, recall, f1, _ = precision_recall_fscore_support(
+        y_true,
+        y_pred,
+        average="binary",
+        zero_division=0,
+    )
+    auc_score = roc_auc_score(y_true, y_scores) if len(set(y_true)) > 1 else 0.0
+    return {
+        "auc": float(auc_score),
+        "accuracy": float(accuracy_score(y_true, y_pred)),
+        "precision": float(precision),
+        "recall": float(recall),
+        "f1": float(f1),
+    }
+
+
 class RAGSystem:
     def __init__(self, config: MIAConfig, documents: list[DocumentRecord]):
         import torch
@@ -151,18 +213,16 @@ class RAGSystem:
             from langchain_huggingface import HuggingFaceEmbeddings
             from langchain_community.vectorstores import FAISS
             from langchain_core.documents import Document
-            from langchain_ollama import OllamaLLM
         except ImportError:
             from langchain.embeddings import HuggingFaceEmbeddings
             from langchain.vectorstores import FAISS
             from langchain.docstore.document import Document
-            from langchain_community.llms import Ollama as OllamaLLM
 
         self.torch = torch
         self.config = config
         self._document_cls = Document
         self.embeddings = HuggingFaceEmbeddings(
-            model_name=config.embedding_model,
+            model_name=config.embedding_model_name,
             encode_kwargs={"normalize_embeddings": True},
             model_kwargs={"device": "cuda" if torch.cuda.is_available() else "cpu"},
         )
@@ -181,7 +241,7 @@ class RAGSystem:
             self.vector_store = FAISS.from_documents(langchain_docs, self.embeddings)
             self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.retriever_k})
 
-        self.llm = OllamaLLM(model=config.llm_model, temperature=config.llm_temperature)
+        self.llm = build_llm(config)
 
     def query(self, masked_text: str) -> tuple[str, list[str]]:
         docs = self.retriever.invoke(masked_text)
@@ -266,8 +326,6 @@ class MIAAttacker:
 
 
 def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, Any]:
-    from sklearn.metrics import roc_auc_score
-
     started = time.time()
     rag = RAGSystem(config, split.members)
     attacker = MIAAttacker(config)
@@ -280,8 +338,8 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
 
     y_true = [item["is_member"] for item in all_results]
     y_scores = [item["mask_acc"] for item in all_results]
+    metrics = compute_membership_metrics(y_true, y_scores, config.gamma)
     retrieval_recalls = [item["retrieval_recall"] for item in member_results]
-    auc_score = roc_auc_score(y_true, y_scores) if len(set(y_true)) > 1 else 0.0
     avg_recall = sum(retrieval_recalls) / len(retrieval_recalls) if retrieval_recalls else 0.0
     runtime_seconds = time.time() - started
 
@@ -292,19 +350,28 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
     gc.collect()
 
     return {
+        "study_name": config.study_name,
         "status": "success",
         "dataset": config.dataset_name,
         "dataset_loader": config.dataset_loader,
+        "model_provider": config.model_provider,
         "llm_model": config.llm_model,
+        "llm_model_name": config.llm_model_name,
         "embedding_model": config.embedding_model,
+        "embedding_model_name": config.embedding_model_name,
         "retriever_type": config.retriever_type,
         "num_masks": config.num_masks,
         "retriever_k": config.retriever_k,
+        "gamma": float(config.gamma),
         "index_size": config.index_size,
         "eval_size": config.eval_size,
         "member_samples": len(member_results),
         "non_member_samples": len(non_member_results),
-        "auc": float(auc_score),
+        "auc": metrics["auc"],
+        "accuracy": metrics["accuracy"],
+        "precision": metrics["precision"],
+        "recall": metrics["recall"],
+        "f1": metrics["f1"],
         "retrieval_recall": float(avg_recall),
         "runtime_seconds": round(runtime_seconds, 4),
         "failure_reason": "",
