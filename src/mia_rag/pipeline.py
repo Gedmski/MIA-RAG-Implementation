@@ -4,10 +4,82 @@ import gc
 import os
 import re
 import time
+from dataclasses import dataclass
 from typing import Any
 
 from .config import MIAConfig
 from .types import DocumentRecord, DatasetSplit
+
+
+@dataclass(frozen=True)
+class ReconstructionDiagnostics:
+    mask_accuracy: float
+    correct_mask_count: int
+    found_mask_count: int
+    format_coverage: float
+    response_len: int
+
+
+def evaluate_reconstruction(response: str, ground_truth: dict[str, list[str]]) -> ReconstructionDiagnostics:
+    if not ground_truth:
+        return ReconstructionDiagnostics(
+            mask_accuracy=0.0,
+            correct_mask_count=0,
+            found_mask_count=0,
+            format_coverage=0.0,
+            response_len=len(response),
+        )
+
+    response_lower = response.lower()
+    correct = 0
+    found = 0
+    for mask_key, valid_answers in ground_truth.items():
+        match = re.search(fr"{re.escape(mask_key).lower()}[:\s]+(.*?)(?:\n|$)", response_lower)
+        if not match:
+            continue
+        found += 1
+        predicted_raw = match.group(1)
+        predicted_words = re.split(r"\W+", predicted_raw)
+        valid = [answer.lower().strip() for answer in valid_answers]
+        if any(answer in predicted_words or answer in predicted_raw for answer in valid):
+            correct += 1
+
+    total_masks = len(ground_truth)
+    return ReconstructionDiagnostics(
+        mask_accuracy=correct / total_masks,
+        correct_mask_count=correct,
+        found_mask_count=found,
+        format_coverage=found / total_masks,
+        response_len=len(response),
+    )
+
+
+def _mean_metric(records: list[dict[str, Any]], key: str) -> float:
+    if not records:
+        return 0.0
+    return float(sum(float(record.get(key, 0.0)) for record in records) / len(records))
+
+
+def aggregate_attack_diagnostics(
+    member_results: list[dict[str, Any]],
+    non_member_results: list[dict[str, Any]],
+    gamma: float,
+) -> dict[str, float]:
+    retrieved_members = [record for record in member_results if float(record.get("retrieval_hit", 0.0)) >= 1.0]
+    generation_failures = [
+        record for record in retrieved_members if float(record.get("mask_acc", 0.0)) < float(gamma)
+    ]
+    return {
+        "member_mean_mask_accuracy": _mean_metric(member_results, "mask_acc"),
+        "non_member_mean_mask_accuracy": _mean_metric(non_member_results, "mask_acc"),
+        "member_mean_format_coverage": _mean_metric(member_results, "format_coverage"),
+        "non_member_mean_format_coverage": _mean_metric(non_member_results, "format_coverage"),
+        "member_exact_reconstruction_rate": _mean_metric(member_results, "exact_reconstruction"),
+        "non_member_exact_reconstruction_rate": _mean_metric(non_member_results, "exact_reconstruction"),
+        "generation_failure_rate": (
+            float(len(generation_failures) / len(retrieved_members)) if retrieved_members else 0.0
+        ),
+    }
 
 
 class MaskGenerator:
@@ -284,21 +356,8 @@ class MIAAttacker:
         )
 
     @staticmethod
-    def evaluate_correctness(response: str, ground_truth: dict[str, list[str]]) -> float:
-        if not ground_truth:
-            return 0.0
-        response_lower = response.lower()
-        correct = 0
-        for mask_key, valid_answers in ground_truth.items():
-            match = re.search(fr"{re.escape(mask_key).lower()}[:\s]+(.*?)(?:\n|$)", response_lower)
-            if not match:
-                continue
-            predicted_raw = match.group(1)
-            predicted_words = re.split(r"\W+", predicted_raw)
-            valid = [answer.lower().strip() for answer in valid_answers]
-            if any(answer in predicted_words or answer in predicted_raw for answer in valid):
-                correct += 1
-        return correct / len(ground_truth)
+    def evaluate_correctness(response: str, ground_truth: dict[str, list[str]]) -> ReconstructionDiagnostics:
+        return evaluate_reconstruction(response, ground_truth)
 
     def run_experiment(self, rag: RAGSystem, target_docs: list[DocumentRecord], is_member: bool) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -312,14 +371,20 @@ class MIAAttacker:
             if not ground_truth:
                 continue
             response, retrieved_ids = rag.query(masked_text)
-            mask_accuracy = self.evaluate_correctness(response, ground_truth)
+            diagnostics = self.evaluate_correctness(response, ground_truth)
             retrieval_hit = float(str(document.doc_id) in retrieved_ids) if is_member else 0.0
             results.append(
                 {
                     "is_member": membership_label,
-                    "mask_acc": mask_accuracy,
+                    "mask_acc": diagnostics.mask_accuracy,
+                    "correct_mask_count": diagnostics.correct_mask_count,
+                    "found_mask_count": diagnostics.found_mask_count,
+                    "format_coverage": diagnostics.format_coverage,
                     "retrieval_recall": retrieval_hit,
-                    "response_len": len(response),
+                    "retrieval_hit": retrieval_hit,
+                    "response_len": diagnostics.response_len,
+                    "exact_reconstruction": float(diagnostics.mask_accuracy >= 1.0),
+                    "generation_failure": float(retrieval_hit >= 1.0 and diagnostics.mask_accuracy < self.config.gamma),
                 }
             )
         return results
@@ -341,6 +406,7 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
     metrics = compute_membership_metrics(y_true, y_scores, config.gamma)
     retrieval_recalls = [item["retrieval_recall"] for item in member_results]
     avg_recall = sum(retrieval_recalls) / len(retrieval_recalls) if retrieval_recalls else 0.0
+    diagnostics = aggregate_attack_diagnostics(member_results, non_member_results, config.gamma)
     runtime_seconds = time.time() - started
 
     if hasattr(rag, "torch") and rag.torch.cuda.is_available():
@@ -373,6 +439,13 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "recall": metrics["recall"],
         "f1": metrics["f1"],
         "retrieval_recall": float(avg_recall),
+        "member_mean_mask_accuracy": diagnostics["member_mean_mask_accuracy"],
+        "non_member_mean_mask_accuracy": diagnostics["non_member_mean_mask_accuracy"],
+        "member_mean_format_coverage": diagnostics["member_mean_format_coverage"],
+        "non_member_mean_format_coverage": diagnostics["non_member_mean_format_coverage"],
+        "member_exact_reconstruction_rate": diagnostics["member_exact_reconstruction_rate"],
+        "non_member_exact_reconstruction_rate": diagnostics["non_member_exact_reconstruction_rate"],
+        "generation_failure_rate": diagnostics["generation_failure_rate"],
         "runtime_seconds": round(runtime_seconds, 4),
         "failure_reason": "",
         "config_repr": config.compat_repr(),

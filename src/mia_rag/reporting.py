@@ -21,6 +21,10 @@ SUMMARY_COLUMNS = [
     "model_provider",
     "llm_model",
     "llm_model_name",
+    "model_family",
+    "model_size_label",
+    "model_params_b",
+    "closed_weights",
     "embedding_model",
     "embedding_model_name",
     "retriever_type",
@@ -37,6 +41,13 @@ SUMMARY_COLUMNS = [
     "recall",
     "f1",
     "retrieval_recall",
+    "member_mean_mask_accuracy",
+    "non_member_mean_mask_accuracy",
+    "member_mean_format_coverage",
+    "non_member_mean_format_coverage",
+    "member_exact_reconstruction_rate",
+    "non_member_exact_reconstruction_rate",
+    "generation_failure_rate",
     "runtime_seconds",
     "failure_reason",
     "config_repr",
@@ -55,6 +66,14 @@ NUMERIC_COLUMNS = [
     "recall",
     "f1",
     "retrieval_recall",
+    "model_params_b",
+    "member_mean_mask_accuracy",
+    "non_member_mean_mask_accuracy",
+    "member_mean_format_coverage",
+    "non_member_mean_format_coverage",
+    "member_exact_reconstruction_rate",
+    "non_member_exact_reconstruction_rate",
+    "generation_failure_rate",
     "runtime_seconds",
 ]
 
@@ -106,7 +125,9 @@ def _format_table(dataframe: pd.DataFrame) -> str:
         return "_No data available._"
     display = dataframe.copy()
     for column in display.columns:
-        if pd.api.types.is_numeric_dtype(display[column]):
+        if pd.api.types.is_bool_dtype(display[column]):
+            display[column] = display[column].map(lambda value: "" if pd.isna(value) else str(bool(value)))
+        elif pd.api.types.is_numeric_dtype(display[column]):
             display[column] = display[column].map(
                 lambda value: (
                     ""
@@ -140,6 +161,10 @@ def _metric_text(value: object) -> str:
     if value is None or pd.isna(value):
         return "n/a"
     return f"{float(value):.4f}"
+
+
+def _has_non_null(dataframe: pd.DataFrame, column: str) -> bool:
+    return column in dataframe.columns and dataframe[column].notna().any()
 
 
 def _group_metric(dataframe: pd.DataFrame, group_by: list[str]) -> pd.DataFrame:
@@ -228,6 +253,104 @@ def _append_dataset_sections(lines: list[str], dataframe: pd.DataFrame) -> None:
             lines.extend([f"### M x K Matrix: {model_name}", "", _format_table(pivot.reset_index().rename(columns={"num_masks": "M"})), ""])
 
 
+def _append_model_scale_section(lines: list[str], dataframe: pd.DataFrame) -> None:
+    if not _has_non_null(dataframe, "model_family") and not _has_non_null(dataframe, "model_size_label"):
+        return
+    section = dataframe.copy()
+    group_columns = ["model_family", "model_size_label", "llm_model", "closed_weights"]
+    sort_columns = ["model_family", "model_size_label", "llm_model"]
+    if "model_params_b" in section.columns and section["model_params_b"].notna().any():
+        group_columns.append("model_params_b")
+        sort_columns = ["model_family", "model_params_b", "model_size_label", "llm_model"]
+    grouped = (
+        section.groupby(group_columns, dropna=False)[
+            ["auc", "f1", "member_mean_format_coverage", "member_exact_reconstruction_rate"]
+        ]
+        .mean()
+        .reset_index()
+        .sort_values(sort_columns, na_position="last")
+    )
+    lines.extend(
+        [
+            "### Model Scale Comparison",
+            "",
+            _format_table(
+                grouped.rename(
+                    columns={
+                        "model_family": "Family",
+                        "model_size_label": "Size/Tier",
+                        "llm_model": "Model",
+                        "closed_weights": "Closed Weights",
+                        "model_params_b": "Params (B)",
+                        "auc": "AUC",
+                        "f1": "F1",
+                        "member_mean_format_coverage": "Member Format Coverage",
+                        "member_exact_reconstruction_rate": "Member Exact Reconstruction",
+                    }
+                )
+            ),
+            "",
+        ]
+    )
+
+
+def _append_domain_stack_control_section(lines: list[str], dataframe: pd.DataFrame) -> None:
+    within_dataset = (
+        dataframe.groupby("dataset")[["auc", "f1"]]
+        .agg(["mean", "min", "max"])
+        .reset_index()
+    )
+    within_dataset.columns = [
+        "Dataset",
+        "Mean AUC",
+        "Min AUC",
+        "Max AUC",
+        "Mean F1",
+        "Min F1",
+        "Max F1",
+    ]
+    within_dataset["AUC Range"] = within_dataset["Max AUC"] - within_dataset["Min AUC"]
+
+    stack_means = (
+        dataframe.groupby(["retriever_type", "embedding_model"])[["auc", "f1", "retrieval_recall"]]
+        .mean()
+        .reset_index()
+        .sort_values(["auc", "f1"], ascending=False)
+    )
+
+    lines.extend(
+        [
+            "### Domain vs Retrieval Stack Control",
+            "",
+            "#### Within-Dataset Stack Variance",
+            "",
+            _format_table(within_dataset),
+            "",
+            "#### Cross-Dataset Stack Means",
+            "",
+            _format_table(
+                stack_means.rename(
+                    columns={
+                        "retriever_type": "Retriever",
+                        "embedding_model": "Embedding",
+                        "auc": "Mean AUC",
+                        "f1": "Mean F1",
+                        "retrieval_recall": "Mean Recall",
+                    }
+                )
+            ),
+            "",
+        ]
+    )
+
+
+def _append_study_specific_sections(lines: list[str], study_name: str, dataframe: pd.DataFrame) -> None:
+    if study_name == "ablation_model_scale":
+        _append_model_scale_section(lines, dataframe)
+    if study_name == "ablation_domain_stack_control":
+        _append_domain_stack_control_section(lines, dataframe)
+
+
 def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
     output = Path(output_path)
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -281,8 +404,12 @@ def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
             study_frame = successful[successful["study_name"] == study_name].copy()
             lines.extend([f"## Study: {study_name}", ""])
             _append_dataset_sections(lines, study_frame)
+            _append_study_specific_sections(lines, study_name, study_frame)
     else:
         _append_dataset_sections(lines, successful)
+        study_names = [value for value in successful["study_name"].dropna().unique() if str(value).strip()]
+        if len(study_names) == 1:
+            _append_study_specific_sections(lines, str(study_names[0]), successful)
 
     output.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
 
@@ -301,20 +428,20 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
             .sort_values("auc", ascending=False)
         )
         if not study_summary.empty:
-            plt.figure(figsize=(9, 4))
+            plt.figure(figsize=(11, 5.5))
             study_summary["auc"].plot(kind="bar", color="#2f6db2")
             plt.title("Mean AUC by Study")
             plt.ylabel("AUC")
             plt.tight_layout()
-            plt.savefig(plots_path / "study_auc_comparison.png")
+            plt.savefig(plots_path / "study_auc_comparison.png", dpi=220, bbox_inches="tight")
             plt.close()
 
-            plt.figure(figsize=(9, 4))
+            plt.figure(figsize=(11, 5.5))
             study_summary["f1"].plot(kind="bar", color="#b24c2f")
             plt.title("Mean F1 by Study")
             plt.ylabel("F1")
             plt.tight_layout()
-            plt.savefig(plots_path / "study_f1_comparison.png")
+            plt.savefig(plots_path / "study_f1_comparison.png", dpi=220, bbox_inches="tight")
             plt.close()
         return
 
@@ -323,17 +450,17 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
 
         model_summary = dataset_frame.groupby("llm_model")["auc"].mean().sort_values(ascending=False)
         if not model_summary.empty:
-            plt.figure(figsize=(8, 4))
+            plt.figure(figsize=(10, 5.5))
             model_summary.plot(kind="bar", color="#2f6db2")
             plt.title(f"{dataset_name}: Mean AUC by Model")
             plt.ylabel("AUC")
             plt.tight_layout()
-            plt.savefig(plots_path / f"{dataset_name}_model_comparison.png")
+            plt.savefig(plots_path / f"{dataset_name}_model_comparison.png", dpi=220, bbox_inches="tight")
             plt.close()
 
         recall_auc = dataset_frame.groupby("llm_model")[["retrieval_recall", "auc"]].mean().reset_index()
         if not recall_auc.empty:
-            plt.figure(figsize=(6, 5))
+            plt.figure(figsize=(8, 6))
             plt.scatter(recall_auc["retrieval_recall"], recall_auc["auc"], color="#b24c2f")
             for _, row in recall_auc.iterrows():
                 plt.annotate(row["llm_model"], (row["retrieval_recall"], row["auc"]))
@@ -341,14 +468,14 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
             plt.ylabel("AUC")
             plt.title(f"{dataset_name}: Recall vs AUC")
             plt.tight_layout()
-            plt.savefig(plots_path / f"{dataset_name}_recall_vs_auc.png")
+            plt.savefig(plots_path / f"{dataset_name}_recall_vs_auc.png", dpi=220, bbox_inches="tight")
             plt.close()
 
         for model_name in sorted(dataset_frame["llm_model"].dropna().unique()):
             model_frame = dataset_frame[dataset_frame["llm_model"] == model_name]
             pivot = model_frame.pivot_table(index="num_masks", columns="retriever_k", values="auc", aggfunc="mean")
             if not pivot.empty:
-                plt.figure(figsize=(7, 5))
+                plt.figure(figsize=(9, 6.5))
                 plt.imshow(pivot.values, aspect="auto", cmap="viridis")
                 plt.colorbar(label="AUC")
                 plt.xticks(range(len(pivot.columns)), [str(column) for column in pivot.columns])
@@ -357,12 +484,12 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
                 plt.ylabel("M")
                 plt.title(f"{dataset_name}: {model_name} M x K AUC")
                 plt.tight_layout()
-                plt.savefig(plots_path / f"{dataset_name}_{model_name}_heatmap.png")
+                plt.savefig(plots_path / f"{dataset_name}_{model_name}_heatmap.png", dpi=220, bbox_inches="tight")
                 plt.close()
 
             if not model_frame.empty:
                 mean_by_mask = model_frame.groupby(["num_masks", "retriever_k"])["auc"].mean().reset_index()
-                plt.figure(figsize=(8, 5))
+                plt.figure(figsize=(10, 6))
                 for retriever_k, group in mean_by_mask.groupby("retriever_k"):
                     plt.plot(group["num_masks"], group["auc"], marker="o", label=f"K={int(retriever_k)}")
                 plt.title(f"{dataset_name}: {model_name} AUC vs M")
@@ -370,11 +497,11 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
                 plt.ylabel("AUC")
                 plt.legend()
                 plt.tight_layout()
-                plt.savefig(plots_path / f"{dataset_name}_{model_name}_auc_vs_m.png")
+                plt.savefig(plots_path / f"{dataset_name}_{model_name}_auc_vs_m.png", dpi=220, bbox_inches="tight")
                 plt.close()
 
                 mean_by_k = model_frame.groupby(["retriever_k", "num_masks"])["auc"].mean().reset_index()
-                plt.figure(figsize=(8, 5))
+                plt.figure(figsize=(10, 6))
                 for num_masks, group in mean_by_k.groupby("num_masks"):
                     plt.plot(group["retriever_k"], group["auc"], marker="o", label=f"M={int(num_masks)}")
                 plt.title(f"{dataset_name}: {model_name} AUC vs K")
@@ -382,7 +509,7 @@ def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
                 plt.ylabel("AUC")
                 plt.legend()
                 plt.tight_layout()
-                plt.savefig(plots_path / f"{dataset_name}_{model_name}_auc_vs_k.png")
+                plt.savefig(plots_path / f"{dataset_name}_{model_name}_auc_vs_k.png", dpi=220, bbox_inches="tight")
                 plt.close()
 
 

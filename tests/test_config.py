@@ -219,3 +219,89 @@ reporting:
 
     with pytest.raises(ValueError, match="missing required 'provider' metadata"):
         load_experiment_spec(config_path)
+
+
+def test_model_metadata_is_parsed_and_attached_to_resolved_configs(tmp_path):
+    config_path = tmp_path / "model-metadata.yaml"
+    config_path.write_text(
+        """
+paths:
+  results_root: results
+datasets:
+  sample:
+    loader: healthcaremagic
+    enabled: true
+    dataset_id: sample-dataset
+    split: train
+models:
+  gpt-4o:
+    provider: openai
+    model_name: gpt-4o
+    family: gpt-4o
+    size_label: full
+    closed_weights: true
+  llama3.1-70b:
+    provider: ollama
+    model_name: llama3.1:70b
+    family: llama3.1
+    size_label: 70B
+    params_b: 70
+    closed_weights: false
+retrievers:
+  faiss:
+    enabled: true
+embeddings:
+  bge:
+    model_name: BAAI/bge-small-en-v1.5
+runtime:
+  proxy_model: gpt2
+  masking_strategy: hard
+  use_spelling_correction: true
+  seed: 42
+  gamma: 0.5
+  continue_on_error: true
+  limit_runs:
+  llm_temperature: 0.0
+reporting:
+  generate_plots: false
+  copy_legacy_outputs: false
+defaults:
+  dataset: sample
+  model: gpt-4o
+  retriever: faiss
+  embedding: bge
+  num_masks: 10
+  retriever_k: 5
+  gamma: 0.5
+studies:
+  scale:
+    overrides: {}
+    sweep:
+      model:
+        - gpt-4o
+        - llama3.1-70b
+""",
+        encoding="utf-8",
+    )
+
+    spec = load_experiment_spec(config_path)
+    studies = expand_experiment_studies(spec)
+    assert len(studies) == 1
+    assert len(studies[0].configs) == 2
+    gpt_cfg, llama_cfg = studies[0].configs
+    assert gpt_cfg.model_family == "gpt-4o"
+    assert gpt_cfg.model_size_label == "full"
+    assert gpt_cfg.closed_weights is True
+    assert llama_cfg.model_family == "llama3.1"
+    assert llama_cfg.model_size_label == "70B"
+    assert llama_cfg.model_params_b == 70.0
+    assert llama_cfg.closed_weights is False
+
+
+def test_lean_ablation_includes_new_scale_and_domain_control_studies():
+    spec = load_experiment_spec(ROOT / "configs" / "lean_ablation.yaml")
+    studies = {study.name: study for study in expand_experiment_studies(spec)}
+    assert "ablation_model_scale" in studies
+    assert "ablation_domain_stack_control" in studies
+    assert len(studies["ablation_model_scale"].configs) == 4
+    assert len(studies["ablation_domain_stack_control"].configs) == 12

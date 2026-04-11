@@ -24,6 +24,8 @@ Ollama must be running locally for experiment execution:
 
 ```bash
 ollama pull llama3
+ollama pull llama3.1:8b
+ollama pull llama3.1:70b
 ollama pull mistral
 ollama pull phi3
 ollama serve
@@ -50,6 +52,18 @@ For the study-driven lean ablation layout:
 ```bash
 python mia_rag_attack.py --config configs/lean_ablation.yaml
 ```
+
+The current lean ablation config includes:
+
+- `ablation_model_family`
+- `ablation_model_scale`
+- `ablation_mask_count`
+- `ablation_gamma`
+- `ablation_retrieval_depth`
+- `ablation_retrieval_stack`
+- `ablation_domain_stack_control`
+- `robustness_cross_dataset`
+- `optional_scale_study`
 
 Each run writes:
 
@@ -113,6 +127,13 @@ In study-driven mode:
 - each `studies.<name>.overrides` block changes fixed values for that study
 - each `studies.<name>.sweep` block varies only the factors named in that study
 - supported study fields are `dataset`, `model`, `retriever`, `embedding`, `num_masks`, `retriever_k`, `gamma`, `index_size`, `eval_size`, and `seed`
+
+Optional model metadata keys are also supported in the `models` section:
+
+- `family`
+- `size_label`
+- `params_b`
+- `closed_weights`
 
 ## Dataset Defaults
 

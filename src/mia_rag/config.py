@@ -69,6 +69,10 @@ class ModelSpec:
     provider: str = "ollama"
     model_name: str | None = None
     api_mode: str | None = None
+    family: str | None = None
+    size_label: str | None = None
+    params_b: float | None = None
+    closed_weights: bool | None = None
     enabled: bool = True
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -155,6 +159,10 @@ class MIAConfig:
     model_provider: str
     llm_model: str
     llm_model_name: str
+    model_family: str | None
+    model_size_label: str | None
+    model_params_b: float | None
+    closed_weights: bool | None
     embedding_model: str
     embedding_model_name: str
     dataset_name: str
@@ -286,12 +294,24 @@ def _parse_models(raw: Any) -> dict[str, ModelSpec]:
         provider = str(options.pop("provider"))
         model_name = str(options.pop("model_name", alias))
         api_mode = options.pop("api_mode", None)
+        family = options.pop("family", None)
+        size_label = options.pop("size_label", None)
+        params_b = options.pop("params_b", None)
+        if params_b is not None:
+            params_b = float(params_b)
+        closed_weights = options.pop("closed_weights", None)
+        if closed_weights is not None:
+            closed_weights = bool(closed_weights)
         enabled = bool(options.pop("enabled", True))
         parsed[alias] = ModelSpec(
             alias=alias,
             provider=provider,
             model_name=model_name,
             api_mode=api_mode,
+            family=family,
+            size_label=size_label,
+            params_b=params_b,
+            closed_weights=closed_weights,
             enabled=enabled,
             options=options,
         )
@@ -459,6 +479,10 @@ def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[s
         model_provider=model.provider,
         llm_model=model.alias,
         llm_model_name=model.resolved_model_name(),
+        model_family=model.family,
+        model_size_label=model.size_label,
+        model_params_b=model.params_b,
+        closed_weights=model.closed_weights,
         embedding_model=embedding.alias,
         embedding_model_name=embedding.resolved_model_name(),
         dataset_name=dataset.name,
@@ -502,6 +526,10 @@ def _expand_legacy_configs(spec: ExperimentSpec) -> list[MIAConfig]:
                                     model_provider=model.provider,
                                     llm_model=model.alias,
                                     llm_model_name=model.resolved_model_name(),
+                                    model_family=model.family,
+                                    model_size_label=model.size_label,
+                                    model_params_b=model.params_b,
+                                    closed_weights=model.closed_weights,
                                     embedding_model=embedding.alias,
                                     embedding_model_name=embedding.resolved_model_name(),
                                     dataset_name=dataset.name,
