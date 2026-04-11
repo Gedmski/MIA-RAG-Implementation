@@ -1,0 +1,656 @@
+paths:
+  results_root: results
+  legacy_experiment_log: experiment_results.md
+  legacy_csv: experiment_data.csv
+  legacy_report: results_report.md
+datasets:
+- name: healthcaremagic
+  loader: healthcaremagic
+  enabled: true
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  split: train
+  streaming: false
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  category: null
+  seed: null
+  loader_options:
+    text_fields:
+    - text
+- name: msmarco
+  loader: msmarco
+  enabled: true
+  dataset_id: ms_marco
+  dataset_config: v1.1
+  split: validation
+  streaming: true
+  index_size: 500
+  eval_size: 50
+  min_chars: 100
+  max_chars: 2500
+  category: null
+  seed: null
+  loader_options: {}
+- name: nq
+  loader: nq
+  enabled: true
+  dataset_id: LLukas22/nq-simplified
+  dataset_config: null
+  split: test
+  streaming: false
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  category: null
+  seed: null
+  loader_options: {}
+- name: fiqa
+  loader: fiqa
+  enabled: true
+  dataset_id: BeIR/fiqa
+  dataset_config: corpus
+  split: corpus
+  streaming: false
+  index_size: 500
+  eval_size: 50
+  min_chars: 120
+  max_chars: 2500
+  category: null
+  seed: null
+  loader_options: {}
+- name: arxiv
+  loader: arxiv
+  enabled: true
+  dataset_id: MaartenGr/arxiv_nlp
+  dataset_config: null
+  split: train
+  streaming: false
+  index_size: 500
+  eval_size: 50
+  min_chars: 120
+  max_chars: 2500
+  category: Computation and Language
+  seed: null
+  loader_options:
+    title_fields:
+    - Titles
+    abstract_fields:
+    - Abstracts
+    category_fields:
+    - Categories
+models:
+  gpt-4o-mini:
+    alias: gpt-4o-mini
+    provider: openai
+    model_name: gpt-4o-mini
+    api_mode: null
+    family: gpt-4o
+    size_label: mini
+    params_b: null
+    closed_weights: true
+    enabled: true
+    options: {}
+  gpt-4o:
+    alias: gpt-4o
+    provider: openai
+    model_name: gpt-4o
+    api_mode: null
+    family: gpt-4o
+    size_label: full
+    params_b: null
+    closed_weights: true
+    enabled: true
+    options: {}
+  llama3:
+    alias: llama3
+    provider: ollama
+    model_name: llama3
+    api_mode: null
+    family: llama3
+    size_label: default
+    params_b: null
+    closed_weights: false
+    enabled: true
+    options: {}
+  llama3.1-8b:
+    alias: llama3.1-8b
+    provider: ollama
+    model_name: llama3.1:8b
+    api_mode: null
+    family: llama3.1
+    size_label: 8B
+    params_b: 8.0
+    closed_weights: false
+    enabled: true
+    options: {}
+  llama3.1-70b:
+    alias: llama3.1-70b
+    provider: ollama
+    model_name: llama3.1:70b
+    api_mode: null
+    family: llama3.1
+    size_label: 70B
+    params_b: 70.0
+    closed_weights: false
+    enabled: true
+    options: {}
+  mistral:
+    alias: mistral
+    provider: ollama
+    model_name: mistral
+    api_mode: null
+    family: mistral
+    size_label: default
+    params_b: null
+    closed_weights: false
+    enabled: true
+    options: {}
+  phi3:
+    alias: phi3
+    provider: ollama
+    model_name: phi3
+    api_mode: null
+    family: phi3
+    size_label: default
+    params_b: null
+    closed_weights: false
+    enabled: true
+    options: {}
+retrievers:
+- faiss
+- bm25
+embeddings:
+  all-minilm-l6-v2:
+    alias: all-minilm-l6-v2
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+    provider: sentence_transformers
+    enabled: true
+    options: {}
+  bge-small-en-v1.5:
+    alias: bge-small-en-v1.5
+    model_name: BAAI/bge-small-en-v1.5
+    provider: huggingface
+    enabled: true
+    options: {}
+sweeps: null
+runtime:
+  proxy_model: gpt2
+  masking_strategy: hard
+  use_spelling_correction: true
+  seed: 42
+  gamma: 0.5
+  continue_on_error: true
+  limit_runs: null
+  llm_temperature: 0.0
+reporting:
+  generate_plots: true
+  copy_legacy_outputs: true
+defaults:
+  dataset: healthcaremagic
+  model: gpt-4o-mini
+  retriever: faiss
+  embedding: bge-small-en-v1.5
+  num_masks: 10
+  retriever_k: 5
+  gamma: 0.5
+  seed: 42
+studies:
+- name: baseline_reproduction
+  description: Single anchored baseline.
+  overrides: {}
+  sweep: {}
+- name: ablation_model_family
+  description: Vary only the LLM family.
+  overrides: {}
+  sweep:
+    model:
+    - gpt-4o-mini
+    - llama3
+    - mistral
+    - phi3
+- name: ablation_model_scale
+  description: Compare GPT tiers and Llama parameter scales under the same baseline.
+  overrides:
+    dataset: healthcaremagic
+    retriever: faiss
+    embedding: bge-small-en-v1.5
+    num_masks: 10
+    retriever_k: 5
+    gamma: 0.5
+  sweep:
+    model:
+    - gpt-4o-mini
+    - gpt-4o
+    - llama3.1-8b
+    - llama3.1-70b
+- name: ablation_mask_count
+  description: Vary only mask count M.
+  overrides:
+    model: gpt-4o-mini
+  sweep:
+    num_masks:
+    - 3
+    - 5
+    - 10
+    - 15
+    - 20
+- name: ablation_gamma
+  description: Vary only gamma threshold.
+  overrides:
+    model: gpt-4o-mini
+  sweep:
+    gamma:
+    - 0.3
+    - 0.5
+    - 0.7
+    - 0.9
+- name: ablation_retrieval_depth
+  description: Vary only top-K retrieval depth.
+  overrides:
+    model: gpt-4o-mini
+  sweep:
+    retriever_k:
+    - 1
+    - 3
+    - 5
+    - 10
+- name: ablation_retrieval_stack
+  description: Vary retriever and embedding.
+  overrides:
+    model: gpt-4o-mini
+  sweep:
+    retriever:
+    - faiss
+    - bm25
+    embedding:
+    - bge-small-en-v1.5
+    - all-minilm-l6-v2
+- name: ablation_domain_stack_control
+  description: Hold generator fixed and test domain effects against retrieval-stack
+    variation.
+  overrides:
+    model: gpt-4o-mini
+    num_masks: 10
+    retriever_k: 5
+    gamma: 0.5
+  sweep:
+    dataset:
+    - healthcaremagic
+    - fiqa
+    - arxiv
+    retriever:
+    - faiss
+    - bm25
+    embedding:
+    - bge-small-en-v1.5
+    - all-minilm-l6-v2
+- name: robustness_cross_dataset
+  description: Check whether results hold across the core datasets.
+  overrides:
+    retriever: faiss
+    embedding: bge-small-en-v1.5
+  sweep:
+    dataset:
+    - healthcaremagic
+    - msmarco
+    - nq
+    - fiqa
+    - arxiv
+    model:
+    - gpt-4o-mini
+    - llama3
+- name: optional_scale_study
+  description: Optional index-size and seed sensitivity.
+  overrides:
+    model: gpt-4o-mini
+    retriever: faiss
+    embedding: bge-small-en-v1.5
+  sweep:
+    index_size:
+    - 500
+    - 2000
+    seed:
+    - 42
+    - 1337
+resolved_study_count: 1
+resolved_run_count: 5
+resolved_studies:
+- name: ablation_mask_count
+  description: Vary only mask count M.
+  resolved_run_count: 5
+  resolved_configs:
+  - study_name: ablation_mask_count
+    model_provider: openai
+    llm_model: gpt-4o-mini
+    llm_model_name: gpt-4o-mini
+    model_family: gpt-4o
+    model_size_label: mini
+    model_params_b: null
+    closed_weights: true
+    embedding_model: bge-small-en-v1.5
+    embedding_model_name: BAAI/bge-small-en-v1.5
+    dataset_name: healthcaremagic
+    dataset_loader: healthcaremagic
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    dataset_config: null
+    dataset_split: train
+    dataset_streaming: false
+    dataset_category: null
+    dataset_loader_options:
+      text_fields:
+      - text
+    proxy_model: gpt2
+    num_masks: 3
+    retriever_k: 5
+    gamma: 0.5
+    masking_strategy: hard
+    use_spelling_correction: true
+    retriever_type: faiss
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    seed: 42
+    llm_temperature: 0.0
+  - study_name: ablation_mask_count
+    model_provider: openai
+    llm_model: gpt-4o-mini
+    llm_model_name: gpt-4o-mini
+    model_family: gpt-4o
+    model_size_label: mini
+    model_params_b: null
+    closed_weights: true
+    embedding_model: bge-small-en-v1.5
+    embedding_model_name: BAAI/bge-small-en-v1.5
+    dataset_name: healthcaremagic
+    dataset_loader: healthcaremagic
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    dataset_config: null
+    dataset_split: train
+    dataset_streaming: false
+    dataset_category: null
+    dataset_loader_options:
+      text_fields:
+      - text
+    proxy_model: gpt2
+    num_masks: 5
+    retriever_k: 5
+    gamma: 0.5
+    masking_strategy: hard
+    use_spelling_correction: true
+    retriever_type: faiss
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    seed: 42
+    llm_temperature: 0.0
+  - study_name: ablation_mask_count
+    model_provider: openai
+    llm_model: gpt-4o-mini
+    llm_model_name: gpt-4o-mini
+    model_family: gpt-4o
+    model_size_label: mini
+    model_params_b: null
+    closed_weights: true
+    embedding_model: bge-small-en-v1.5
+    embedding_model_name: BAAI/bge-small-en-v1.5
+    dataset_name: healthcaremagic
+    dataset_loader: healthcaremagic
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    dataset_config: null
+    dataset_split: train
+    dataset_streaming: false
+    dataset_category: null
+    dataset_loader_options:
+      text_fields:
+      - text
+    proxy_model: gpt2
+    num_masks: 10
+    retriever_k: 5
+    gamma: 0.5
+    masking_strategy: hard
+    use_spelling_correction: true
+    retriever_type: faiss
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    seed: 42
+    llm_temperature: 0.0
+  - study_name: ablation_mask_count
+    model_provider: openai
+    llm_model: gpt-4o-mini
+    llm_model_name: gpt-4o-mini
+    model_family: gpt-4o
+    model_size_label: mini
+    model_params_b: null
+    closed_weights: true
+    embedding_model: bge-small-en-v1.5
+    embedding_model_name: BAAI/bge-small-en-v1.5
+    dataset_name: healthcaremagic
+    dataset_loader: healthcaremagic
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    dataset_config: null
+    dataset_split: train
+    dataset_streaming: false
+    dataset_category: null
+    dataset_loader_options:
+      text_fields:
+      - text
+    proxy_model: gpt2
+    num_masks: 15
+    retriever_k: 5
+    gamma: 0.5
+    masking_strategy: hard
+    use_spelling_correction: true
+    retriever_type: faiss
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    seed: 42
+    llm_temperature: 0.0
+  - study_name: ablation_mask_count
+    model_provider: openai
+    llm_model: gpt-4o-mini
+    llm_model_name: gpt-4o-mini
+    model_family: gpt-4o
+    model_size_label: mini
+    model_params_b: null
+    closed_weights: true
+    embedding_model: bge-small-en-v1.5
+    embedding_model_name: BAAI/bge-small-en-v1.5
+    dataset_name: healthcaremagic
+    dataset_loader: healthcaremagic
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    dataset_config: null
+    dataset_split: train
+    dataset_streaming: false
+    dataset_category: null
+    dataset_loader_options:
+      text_fields:
+      - text
+    proxy_model: gpt2
+    num_masks: 20
+    retriever_k: 5
+    gamma: 0.5
+    masking_strategy: hard
+    use_spelling_correction: true
+    retriever_type: faiss
+    index_size: 500
+    eval_size: 50
+    min_chars: 200
+    max_chars: 2500
+    seed: 42
+    llm_temperature: 0.0
+resolved_configs:
+- study_name: ablation_mask_count
+  model_provider: openai
+  llm_model: gpt-4o-mini
+  llm_model_name: gpt-4o-mini
+  model_family: gpt-4o
+  model_size_label: mini
+  model_params_b: null
+  closed_weights: true
+  embedding_model: bge-small-en-v1.5
+  embedding_model_name: BAAI/bge-small-en-v1.5
+  dataset_name: healthcaremagic
+  dataset_loader: healthcaremagic
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  dataset_split: train
+  dataset_streaming: false
+  dataset_category: null
+  dataset_loader_options:
+    text_fields:
+    - text
+  proxy_model: gpt2
+  num_masks: 3
+  retriever_k: 5
+  gamma: 0.5
+  masking_strategy: hard
+  use_spelling_correction: true
+  retriever_type: faiss
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  seed: 42
+  llm_temperature: 0.0
+- study_name: ablation_mask_count
+  model_provider: openai
+  llm_model: gpt-4o-mini
+  llm_model_name: gpt-4o-mini
+  model_family: gpt-4o
+  model_size_label: mini
+  model_params_b: null
+  closed_weights: true
+  embedding_model: bge-small-en-v1.5
+  embedding_model_name: BAAI/bge-small-en-v1.5
+  dataset_name: healthcaremagic
+  dataset_loader: healthcaremagic
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  dataset_split: train
+  dataset_streaming: false
+  dataset_category: null
+  dataset_loader_options:
+    text_fields:
+    - text
+  proxy_model: gpt2
+  num_masks: 5
+  retriever_k: 5
+  gamma: 0.5
+  masking_strategy: hard
+  use_spelling_correction: true
+  retriever_type: faiss
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  seed: 42
+  llm_temperature: 0.0
+- study_name: ablation_mask_count
+  model_provider: openai
+  llm_model: gpt-4o-mini
+  llm_model_name: gpt-4o-mini
+  model_family: gpt-4o
+  model_size_label: mini
+  model_params_b: null
+  closed_weights: true
+  embedding_model: bge-small-en-v1.5
+  embedding_model_name: BAAI/bge-small-en-v1.5
+  dataset_name: healthcaremagic
+  dataset_loader: healthcaremagic
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  dataset_split: train
+  dataset_streaming: false
+  dataset_category: null
+  dataset_loader_options:
+    text_fields:
+    - text
+  proxy_model: gpt2
+  num_masks: 10
+  retriever_k: 5
+  gamma: 0.5
+  masking_strategy: hard
+  use_spelling_correction: true
+  retriever_type: faiss
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  seed: 42
+  llm_temperature: 0.0
+- study_name: ablation_mask_count
+  model_provider: openai
+  llm_model: gpt-4o-mini
+  llm_model_name: gpt-4o-mini
+  model_family: gpt-4o
+  model_size_label: mini
+  model_params_b: null
+  closed_weights: true
+  embedding_model: bge-small-en-v1.5
+  embedding_model_name: BAAI/bge-small-en-v1.5
+  dataset_name: healthcaremagic
+  dataset_loader: healthcaremagic
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  dataset_split: train
+  dataset_streaming: false
+  dataset_category: null
+  dataset_loader_options:
+    text_fields:
+    - text
+  proxy_model: gpt2
+  num_masks: 15
+  retriever_k: 5
+  gamma: 0.5
+  masking_strategy: hard
+  use_spelling_correction: true
+  retriever_type: faiss
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  seed: 42
+  llm_temperature: 0.0
+- study_name: ablation_mask_count
+  model_provider: openai
+  llm_model: gpt-4o-mini
+  llm_model_name: gpt-4o-mini
+  model_family: gpt-4o
+  model_size_label: mini
+  model_params_b: null
+  closed_weights: true
+  embedding_model: bge-small-en-v1.5
+  embedding_model_name: BAAI/bge-small-en-v1.5
+  dataset_name: healthcaremagic
+  dataset_loader: healthcaremagic
+  dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+  dataset_config: null
+  dataset_split: train
+  dataset_streaming: false
+  dataset_category: null
+  dataset_loader_options:
+    text_fields:
+    - text
+  proxy_model: gpt2
+  num_masks: 20
+  retriever_k: 5
+  gamma: 0.5
+  masking_strategy: hard
+  use_spelling_correction: true
+  retriever_type: faiss
+  index_size: 500
+  eval_size: 50
+  min_chars: 200
+  max_chars: 2500
+  seed: 42
+  llm_temperature: 0.0
