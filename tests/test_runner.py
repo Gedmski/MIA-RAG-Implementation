@@ -105,6 +105,10 @@ studies:
             "model_provider": config.model_provider,
             "llm_model": config.llm_model,
             "llm_model_name": config.llm_model_name,
+            "model_family": config.model_family,
+            "model_size_label": config.model_size_label,
+            "model_params_b": config.model_params_b,
+            "closed_weights": config.closed_weights,
             "embedding_model": config.embedding_model,
             "embedding_model_name": config.embedding_model_name,
             "retriever_type": config.retriever_type,
@@ -121,6 +125,13 @@ studies:
             "recall": 0.88,
             "f1": 0.90,
             "retrieval_recall": 1.0,
+            "member_mean_mask_accuracy": 0.85,
+            "non_member_mean_mask_accuracy": 0.15,
+            "member_mean_format_coverage": 0.90,
+            "non_member_mean_format_coverage": 0.35,
+            "member_exact_reconstruction_rate": 0.60,
+            "non_member_exact_reconstruction_rate": 0.05,
+            "generation_failure_rate": 0.40,
             "runtime_seconds": 0.1,
             "failure_reason": "",
             "config_repr": config.compat_repr(),
@@ -140,3 +151,4 @@ studies:
     first_record = json.loads(lines[0])
     assert first_record["study_name"] in {"baseline", "scale"}
     assert "gamma" in first_record
+    assert "generation_failure_rate" in first_record

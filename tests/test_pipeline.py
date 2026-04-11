@@ -11,7 +11,13 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from mia_rag.config import MIAConfig
-from mia_rag.pipeline import OpenAIChatAdapter, build_llm, compute_membership_metrics
+from mia_rag.pipeline import (
+    OpenAIChatAdapter,
+    aggregate_attack_diagnostics,
+    build_llm,
+    compute_membership_metrics,
+    evaluate_reconstruction,
+)
 
 
 def _base_config(provider: str, model_name: str) -> MIAConfig:
@@ -20,6 +26,10 @@ def _base_config(provider: str, model_name: str) -> MIAConfig:
         model_provider=provider,
         llm_model=model_name,
         llm_model_name=model_name,
+        model_family=None,
+        model_size_label=None,
+        model_params_b=None,
+        closed_weights=None,
         embedding_model="mini",
         embedding_model_name="sentence-transformers/all-MiniLM-L6-v2",
         dataset_name="sample",
@@ -95,3 +105,35 @@ def test_build_llm_selects_ollama_provider(monkeypatch):
     assert isinstance(llm, FakeOllamaLLM)
     assert llm.model == "llama3"
     assert llm.temperature == 0.0
+
+
+def test_evaluate_reconstruction_returns_structured_diagnostics():
+    diagnostics = evaluate_reconstruction(
+        response="[MASK_1]: insulin\n[MASK_2]: pancreas",
+        ground_truth={
+            "[MASK_1]": ["insulin"],
+            "[MASK_2]": ["pancreas"],
+            "[MASK_3]": ["glucose"],
+        },
+    )
+    assert round(diagnostics.mask_accuracy, 4) == 0.6667
+    assert diagnostics.correct_mask_count == 2
+    assert diagnostics.found_mask_count == 2
+    assert round(diagnostics.format_coverage, 4) == 0.6667
+    assert diagnostics.response_len > 0
+
+
+def test_aggregate_attack_diagnostics_tracks_generation_failures():
+    member_results = [
+        {"mask_acc": 1.0, "format_coverage": 1.0, "exact_reconstruction": 1.0, "retrieval_hit": 1.0},
+        {"mask_acc": 0.4, "format_coverage": 0.5, "exact_reconstruction": 0.0, "retrieval_hit": 1.0},
+    ]
+    non_member_results = [
+        {"mask_acc": 0.2, "format_coverage": 0.5, "exact_reconstruction": 0.0, "retrieval_hit": 0.0},
+        {"mask_acc": 0.0, "format_coverage": 0.0, "exact_reconstruction": 0.0, "retrieval_hit": 0.0},
+    ]
+    diagnostics = aggregate_attack_diagnostics(member_results, non_member_results, gamma=0.5)
+    assert round(diagnostics["member_mean_mask_accuracy"], 4) == 0.7
+    assert round(diagnostics["non_member_mean_mask_accuracy"], 4) == 0.1
+    assert round(diagnostics["member_mean_format_coverage"], 4) == 0.75
+    assert round(diagnostics["generation_failure_rate"], 4) == 0.5

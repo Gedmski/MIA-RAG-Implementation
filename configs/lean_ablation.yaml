@@ -67,15 +67,47 @@ models:
   gpt-4o-mini:
     provider: openai
     model_name: gpt-4o-mini
+    family: gpt-4o
+    size_label: mini
+    closed_weights: true
+  gpt-4o:
+    provider: openai
+    model_name: gpt-4o
+    family: gpt-4o
+    size_label: full
+    closed_weights: true
   llama3:
     provider: ollama
     model_name: llama3
+    family: llama3
+    size_label: default
+    closed_weights: false
+  llama3.1-8b:
+    provider: ollama
+    model_name: llama3.1:8b
+    family: llama3.1
+    size_label: 8B
+    params_b: 8
+    closed_weights: false
+  llama3.1-70b:
+    provider: ollama
+    model_name: llama3.1:70b
+    family: llama3.1
+    size_label: 70B
+    params_b: 70
+    closed_weights: false
   mistral:
     provider: ollama
     model_name: mistral
+    family: mistral
+    size_label: default
+    closed_weights: false
   phi3:
     provider: ollama
     model_name: phi3
+    family: phi3
+    size_label: default
+    closed_weights: false
 
 retrievers:
   faiss:
@@ -131,6 +163,22 @@ studies:
         - mistral
         - phi3
 
+  ablation_model_scale:
+    description: Compare GPT tiers and Llama parameter scales under the same baseline.
+    overrides:
+      dataset: healthcaremagic
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      num_masks: 10
+      retriever_k: 5
+      gamma: 0.5
+    sweep:
+      model:
+        - gpt-4o-mini
+        - gpt-4o
+        - llama3.1-8b
+        - llama3.1-70b
+
   ablation_mask_count:
     description: Vary only mask count M.
     overrides:
@@ -170,6 +218,25 @@ studies:
     overrides:
       model: gpt-4o-mini
     sweep:
+      retriever:
+        - faiss
+        - bm25
+      embedding:
+        - bge-small-en-v1.5
+        - all-minilm-l6-v2
+
+  ablation_domain_stack_control:
+    description: Hold generator fixed and test domain effects against retrieval-stack variation.
+    overrides:
+      model: gpt-4o-mini
+      num_masks: 10
+      retriever_k: 5
+      gamma: 0.5
+    sweep:
+      dataset:
+        - healthcaremagic
+        - fiqa
+        - arxiv
       retriever:
         - faiss
         - bm25
