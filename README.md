@@ -8,6 +8,7 @@ This repository now uses a package-based layout for the Mask-Based Membership In
 - `configs/default.yaml`: legacy full experiment sweep across baseline and new datasets
 - `configs/smoke.yaml`: small legacy sweep for validation in a separate VM
 - `configs/lean_ablation.yaml`: study-driven lean ablation plan with shared defaults and named study blocks
+- `docs/MBMIA_EVALUATION_PROTOCOL.md`: publication-oriented controls for mask-based MIA evaluation
 - `results/`: canonical structured outputs for each invocation
 - `mia_rag_attack.py`: compatibility wrapper for `python mia_rag_attack.py --config <yaml>`
 - `process_results.py`: compatibility wrapper for `python process_results.py --input <run_dir or file>`
@@ -65,6 +66,30 @@ The current lean ablation config includes:
 - `robustness_cross_dataset`
 - `optional_scale_study`
 
+The current configs use the journal-oriented MBMIA controls by default:
+
+- disjoint calibration and held-out evaluation targets
+- calibration-only threshold selection for binary F1/accuracy metrics
+- ROC AUC, PR-AUC, balanced accuracy, and low-FPR TPR reporting
+- bootstrap AUC confidence intervals
+- chunked RAG indexing with parent-document retrieval-hit diagnostics
+- exact and near-duplicate checks for non-member contamination
+- masked-query answer leakage and retrieved-context answer coverage diagnostics
+
+The `ablation_gamma` study intentionally disables threshold calibration so it can measure fixed-threshold sensitivity. Other studies should normally keep calibration enabled.
+
+Before running model-backed studies, validate the protocol wiring:
+
+```bash
+python scripts/validate_mbmia_protocol.py
+```
+
+Before using a result table in the manuscript, audit it for missing controls:
+
+```bash
+python scripts/audit_mbmia_results.py results/YYYY-MM-DD/<run_id>/summary.csv --strict
+```
+
 Each run writes:
 
 - `resolved_config.yaml`
@@ -81,6 +106,8 @@ The latest structured results are also mirrored to the root compatibility files:
 - `experiment_results.md`
 - `experiment_data.csv`
 - `results_report.md`
+
+Historical March/April result files in this repository were produced before the calibrated/chunked protocol. Treat their near-ceiling MBMIA AUC values as reproduction artifacts, not journal-ready evidence, until the studies are rerun with the current configs.
 
 ## Processing Results
 
@@ -127,6 +154,7 @@ In study-driven mode:
 - each `studies.<name>.overrides` block changes fixed values for that study
 - each `studies.<name>.sweep` block varies only the factors named in that study
 - supported study fields are `dataset`, `model`, `retriever`, `embedding`, `num_masks`, `retriever_k`, `gamma`, `index_size`, `eval_size`, and `seed`
+- publication-control fields are also supported: `calibration_size`, `calibrate_threshold`, `bootstrap_iterations`, `chunk_chars`, and `chunk_overlap`
 
 Optional model metadata keys are also supported in the `models` section:
 

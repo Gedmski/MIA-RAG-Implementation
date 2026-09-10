@@ -15,8 +15,13 @@ from mia_rag.pipeline import (
     OpenAIChatAdapter,
     aggregate_attack_diagnostics,
     build_llm,
+    chunk_document_text,
     compute_membership_metrics,
     evaluate_reconstruction,
+    evaluate_mask_quality,
+    _answer_occurrence_counts,
+    _is_non_leaking_mask_candidate,
+    select_decision_threshold,
 )
 
 
@@ -44,6 +49,10 @@ def _base_config(provider: str, model_name: str) -> MIAConfig:
         num_masks=5,
         retriever_k=3,
         gamma=0.5,
+        calibration_size=0,
+        calibrate_threshold=True,
+        bootstrap_iterations=100,
+        avoid_query_answer_leakage=True,
         masking_strategy="hard",
         use_spelling_correction=True,
         retriever_type="faiss",
@@ -51,6 +60,8 @@ def _base_config(provider: str, model_name: str) -> MIAConfig:
         eval_size=10,
         min_chars=10,
         max_chars=200,
+        chunk_chars=None,
+        chunk_overlap=0,
         seed=42,
         llm_temperature=0.0,
     )
@@ -67,6 +78,18 @@ def test_compute_membership_metrics_respects_gamma_threshold():
     assert round(metrics["precision"], 4) == 0.5
     assert round(metrics["recall"], 4) == 0.5
     assert round(metrics["f1"], 4) == 0.5
+    assert round(metrics["balanced_accuracy"], 4) == 0.5
+    assert "pr_auc" in metrics
+    assert "tpr_at_5_fpr" in metrics
+
+
+def test_select_decision_threshold_uses_calibration_scores():
+    threshold = select_decision_threshold(
+        y_true=[1, 1, 0, 0],
+        y_scores=[0.8, 0.7, 0.4, 0.2],
+        fallback_gamma=0.1,
+    )
+    assert threshold == 0.7
 
 
 def test_build_llm_selects_openai_provider(monkeypatch):
@@ -121,6 +144,37 @@ def test_evaluate_reconstruction_returns_structured_diagnostics():
     assert diagnostics.found_mask_count == 2
     assert round(diagnostics.format_coverage, 4) == 0.6667
     assert diagnostics.response_len > 0
+
+
+def test_evaluate_reconstruction_requires_exact_answer_candidate():
+    diagnostics = evaluate_reconstruction(
+        response="[MASK_1]: insulinized",
+        ground_truth={"[MASK_1]": ["insulin"]},
+    )
+    assert diagnostics.mask_accuracy == 0.0
+
+
+def test_evaluate_mask_quality_detects_query_leakage_and_context_coverage():
+    diagnostics = evaluate_mask_quality(
+        masked_text="The [MASK_1] dose lowered insulin levels.",
+        ground_truth={"[MASK_1]": ["insulin"]},
+        retrieved_context="The patient was prescribed insulin.",
+    )
+    assert diagnostics.query_answer_leakage == 1.0
+    assert diagnostics.context_answer_coverage == 1.0
+    assert diagnostics.mask_count == 1
+
+
+def test_repeated_answers_are_not_non_leaking_mask_candidates():
+    words = "insulin lowers glucose but insulin can vary".split()
+    counts = _answer_occurrence_counts(words)
+    assert _is_non_leaking_mask_candidate("glucose", counts) is True
+    assert _is_non_leaking_mask_candidate("insulin", counts) is False
+
+
+def test_chunk_document_text_uses_overlap():
+    chunks = chunk_document_text("abcdefghijklmnopqrstuvwxyz", chunk_chars=10, chunk_overlap=2)
+    assert chunks == ["abcdefghij", "ijklmnopqr", "qrstuvwxyz"]
 
 
 def test_aggregate_attack_diagnostics_tracks_generation_failures():

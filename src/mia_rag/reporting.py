@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Iterable
 
-import matplotlib.pyplot as plt
 import pandas as pd
 
 from .legacy import LEGACY_COMPAT_COLUMNS, render_legacy_markdown, structured_to_compat_df
@@ -31,15 +30,34 @@ SUMMARY_COLUMNS = [
     "num_masks",
     "retriever_k",
     "gamma",
+    "configured_gamma",
+    "threshold_source",
+    "calibrate_threshold",
+    "calibration_size",
+    "bootstrap_iterations",
+    "avoid_query_answer_leakage",
+    "chunk_chars",
+    "chunk_overlap",
     "index_size",
     "eval_size",
     "member_samples",
     "non_member_samples",
+    "calibration_member_samples",
+    "calibration_non_member_samples",
     "auc",
+    "auc_ci_low",
+    "auc_ci_high",
+    "pr_auc",
+    "balanced_accuracy",
+    "tpr_at_1_fpr",
+    "tpr_at_5_fpr",
     "accuracy",
     "precision",
     "recall",
     "f1",
+    "calibration_auc",
+    "calibration_pr_auc",
+    "calibration_f1",
     "retrieval_recall",
     "member_mean_mask_accuracy",
     "non_member_mean_mask_accuracy",
@@ -47,7 +65,21 @@ SUMMARY_COLUMNS = [
     "non_member_mean_format_coverage",
     "member_exact_reconstruction_rate",
     "non_member_exact_reconstruction_rate",
+    "member_query_answer_leakage_rate",
+    "non_member_query_answer_leakage_rate",
+    "member_context_answer_coverage",
+    "non_member_context_answer_coverage",
+    "member_short_answer_rate",
+    "non_member_short_answer_rate",
+    "member_common_answer_rate",
+    "non_member_common_answer_rate",
     "generation_failure_rate",
+    "eval_non_member_exact_duplicate_rate",
+    "eval_non_member_near_duplicate_rate",
+    "eval_non_member_max_similarity_mean",
+    "calibration_non_member_exact_duplicate_rate",
+    "calibration_non_member_near_duplicate_rate",
+    "calibration_non_member_max_similarity_mean",
     "runtime_seconds",
     "failure_reason",
     "config_repr",
@@ -56,15 +88,31 @@ NUMERIC_COLUMNS = [
     "num_masks",
     "retriever_k",
     "gamma",
+    "configured_gamma",
+    "calibration_size",
+    "bootstrap_iterations",
+    "chunk_chars",
+    "chunk_overlap",
     "index_size",
     "eval_size",
     "member_samples",
     "non_member_samples",
+    "calibration_member_samples",
+    "calibration_non_member_samples",
     "auc",
+    "auc_ci_low",
+    "auc_ci_high",
+    "pr_auc",
+    "balanced_accuracy",
+    "tpr_at_1_fpr",
+    "tpr_at_5_fpr",
     "accuracy",
     "precision",
     "recall",
     "f1",
+    "calibration_auc",
+    "calibration_pr_auc",
+    "calibration_f1",
     "retrieval_recall",
     "model_params_b",
     "member_mean_mask_accuracy",
@@ -73,7 +121,21 @@ NUMERIC_COLUMNS = [
     "non_member_mean_format_coverage",
     "member_exact_reconstruction_rate",
     "non_member_exact_reconstruction_rate",
+    "member_query_answer_leakage_rate",
+    "non_member_query_answer_leakage_rate",
+    "member_context_answer_coverage",
+    "non_member_context_answer_coverage",
+    "member_short_answer_rate",
+    "non_member_short_answer_rate",
+    "member_common_answer_rate",
+    "non_member_common_answer_rate",
     "generation_failure_rate",
+    "eval_non_member_exact_duplicate_rate",
+    "eval_non_member_near_duplicate_rate",
+    "eval_non_member_max_similarity_mean",
+    "calibration_non_member_exact_duplicate_rate",
+    "calibration_non_member_near_duplicate_rate",
+    "calibration_non_member_max_similarity_mean",
     "runtime_seconds",
 ]
 
@@ -228,11 +290,27 @@ def _append_dataset_sections(lines: list[str], dataframe: pd.DataFrame) -> None:
             ]
         )
 
-        best_worst = (
-            dataset_frame.sort_values("auc", ascending=False)[
-                ["llm_model", "retriever_type", "embedding_model", "num_masks", "retriever_k", "gamma", "auc", "f1"]
-            ]
-        )
+        best_worst_columns = [
+            "llm_model",
+            "retriever_type",
+            "embedding_model",
+            "num_masks",
+            "retriever_k",
+            "gamma",
+            "threshold_source",
+            "auc",
+            "auc_ci_low",
+            "auc_ci_high",
+            "pr_auc",
+            "tpr_at_5_fpr",
+            "f1",
+            "member_context_answer_coverage",
+            "non_member_context_answer_coverage",
+            "member_query_answer_leakage_rate",
+        ]
+        best_worst = dataset_frame.sort_values("auc", ascending=False)[
+            [column for column in best_worst_columns if column in dataset_frame.columns]
+        ]
         lines.extend(
             [
                 "### Best And Worst Configurations",
@@ -371,7 +449,13 @@ def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
             f"- Failed runs: `{int((dataframe['status'] == 'failed').sum())}`",
             f"- Best study/config: `{best_row['study_name']} / {best_row['dataset']} / {best_row['llm_model']} / {best_row['retriever_type']} / M={int(best_row['num_masks'])} / K={int(best_row['retriever_k'])} / gamma={_metric_text(best_row['gamma'])}`",
             f"- Best AUC: `{_metric_text(best_row['auc'])}`",
+            f"- Best AUC 95% CI: `{_metric_text(best_row.get('auc_ci_low'))}` to `{_metric_text(best_row.get('auc_ci_high'))}`",
+            f"- Best PR-AUC: `{_metric_text(best_row.get('pr_auc'))}`",
+            f"- Best TPR at 5% FPR: `{_metric_text(best_row.get('tpr_at_5_fpr'))}`",
             f"- Best F1: `{_metric_text(best_row['f1'])}`",
+            f"- Threshold source: `{best_row.get('threshold_source', 'n/a')}`",
+            f"- Member context answer coverage: `{_metric_text(best_row.get('member_context_answer_coverage'))}`",
+            f"- Member query answer leakage: `{_metric_text(best_row.get('member_query_answer_leakage_rate'))}`",
             "",
         ]
     )
@@ -415,6 +499,11 @@ def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:
 
 
 def generate_plots(dataframe: pd.DataFrame, plots_dir: str | Path) -> None:
+    try:
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        raise ImportError("matplotlib is required only when plot generation is enabled.") from exc
+
     plots_path = Path(plots_dir)
     plots_path.mkdir(parents=True, exist_ok=True)
     successful = _successful_runs(dataframe)
