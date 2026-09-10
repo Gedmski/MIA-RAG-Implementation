@@ -33,6 +33,12 @@ def test_load_experiment_spec_and_expand_smoke_config():
     assert first.num_masks in {3, 5}
     assert first.retriever_k in {1, 3}
     assert first.gamma == 0.5
+    assert first.calibration_size == 5
+    assert first.calibrate_threshold is True
+    assert first.bootstrap_iterations == 100
+    assert first.avoid_query_answer_leakage is True
+    assert first.chunk_chars == 500
+    assert first.chunk_overlap == 75
 
 
 def test_study_config_expands_per_study_without_global_cross_product(tmp_path):
@@ -305,3 +311,5 @@ def test_lean_ablation_includes_new_scale_and_domain_control_studies():
     assert "ablation_domain_stack_control" in studies
     assert len(studies["ablation_model_scale"].configs) == 4
     assert len(studies["ablation_domain_stack_control"].configs) == 12
+    assert studies["baseline_reproduction"].configs[0].calibrate_threshold is True
+    assert studies["ablation_gamma"].configs[0].calibrate_threshold is False

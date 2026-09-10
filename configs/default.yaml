@@ -12,8 +12,11 @@ datasets:
     split: train
     index_size: 500
     eval_size: 50
+    calibration_size: 25
     min_chars: 200
     max_chars: 2500
+    chunk_chars: 800
+    chunk_overlap: 100
     text_fields:
       - text
   - name: msmarco
@@ -25,8 +28,11 @@ datasets:
     streaming: true
     index_size: 500
     eval_size: 50
+    calibration_size: 25
     min_chars: 100
     max_chars: 2500
+    chunk_chars: 800
+    chunk_overlap: 100
   - name: nq
     loader: nq
     enabled: true
@@ -34,8 +40,11 @@ datasets:
     split: test
     index_size: 500
     eval_size: 50
+    calibration_size: 25
     min_chars: 200
     max_chars: 2500
+    chunk_chars: 800
+    chunk_overlap: 100
   - name: fiqa
     loader: fiqa
     enabled: true
@@ -44,8 +53,11 @@ datasets:
     split: corpus
     index_size: 500
     eval_size: 50
+    calibration_size: 25
     min_chars: 120
     max_chars: 2500
+    chunk_chars: 800
+    chunk_overlap: 100
   - name: arxiv
     loader: arxiv
     enabled: true
@@ -54,8 +66,11 @@ datasets:
     category: Computation and Language
     index_size: 500
     eval_size: 50
+    calibration_size: 25
     min_chars: 120
     max_chars: 2500
+    chunk_chars: 800
+    chunk_overlap: 100
     title_fields:
       - Titles
     abstract_fields:
@@ -97,6 +112,10 @@ runtime:
   masking_strategy: hard
   use_spelling_correction: true
   seed: 42
+  gamma: 0.5
+  calibrate_threshold: true
+  bootstrap_iterations: 200
+  avoid_query_answer_leakage: true
   continue_on_error: true
   limit_runs:
   llm_temperature: 0.0

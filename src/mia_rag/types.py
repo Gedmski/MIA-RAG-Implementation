@@ -17,3 +17,5 @@ class DatasetSplit:
     non_members: list[DocumentRecord]
     eval_members: list[DocumentRecord]
     eval_non_members: list[DocumentRecord]
+    calibration_members: list[DocumentRecord] = field(default_factory=list)
+    calibration_non_members: list[DocumentRecord] = field(default_factory=list)

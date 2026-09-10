@@ -30,6 +30,12 @@ SUPPORTED_STUDY_FIELDS = {
     "gamma",
     "index_size",
     "eval_size",
+    "calibration_size",
+    "calibrate_threshold",
+    "bootstrap_iterations",
+    "avoid_query_answer_leakage",
+    "chunk_chars",
+    "chunk_overlap",
     "seed",
 }
 
@@ -53,14 +59,17 @@ class DatasetSpec:
     streaming: bool = False
     index_size: int = 500
     eval_size: int = 50
+    calibration_size: int = 0
     min_chars: int = 200
     max_chars: int = 2500
+    chunk_chars: int | None = None
+    chunk_overlap: int = 0
     category: str | None = None
     seed: int | None = None
     loader_options: dict[str, Any] = field(default_factory=dict)
 
     def required_documents(self) -> int:
-        return self.index_size + self.eval_size
+        return self.index_size + self.eval_size + self.calibration_size
 
 
 @dataclass
@@ -105,6 +114,9 @@ class RuntimeConfig:
     use_spelling_correction: bool = True
     seed: int = 42
     gamma: float = 0.5
+    calibrate_threshold: bool = True
+    bootstrap_iterations: int = 200
+    avoid_query_answer_leakage: bool = True
     continue_on_error: bool = True
     limit_runs: int | None = None
     llm_temperature: float = 0.0
@@ -177,6 +189,10 @@ class MIAConfig:
     num_masks: int
     retriever_k: int
     gamma: float
+    calibration_size: int
+    calibrate_threshold: bool
+    bootstrap_iterations: int
+    avoid_query_answer_leakage: bool
     masking_strategy: str
     use_spelling_correction: bool
     retriever_type: str
@@ -184,14 +200,18 @@ class MIAConfig:
     eval_size: int
     min_chars: int
     max_chars: int
+    chunk_chars: int | None
+    chunk_overlap: int
     seed: int
     llm_temperature: float = 0.0
 
     def compat_repr(self) -> str:
+        chunk_text = f", Chunk={self.chunk_chars}/{self.chunk_overlap}" if self.chunk_chars else ""
+        leakage_text = ", NoQueryLeak" if self.avoid_query_answer_leakage else ""
         return (
             f"Config(LLM={self.llm_model}, Data={self.dataset_name}, Emb={self.embedding_model}, "
             f"Ret={self.retriever_type}, M={self.num_masks}, K={self.retriever_k}, "
-            f"Idx={self.index_size}, Eval={self.eval_size})"
+            f"Idx={self.index_size}, Eval={self.eval_size}, Cal={self.calibration_size}{chunk_text}{leakage_text})"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -251,8 +271,11 @@ def _parse_dataset_spec(raw: dict[str, Any]) -> DatasetSpec:
         "streaming",
         "index_size",
         "eval_size",
+        "calibration_size",
         "min_chars",
         "max_chars",
+        "chunk_chars",
+        "chunk_overlap",
         "category",
         "seed",
     }
@@ -452,6 +475,12 @@ def _coerce_float(value: Any, field_name: str) -> float:
         raise ValueError(f"Field '{field_name}' must be numeric, got {value!r}") from exc
 
 
+def _coerce_optional_int(value: Any, field_name: str) -> int | None:
+    if value is None or value == "":
+        return None
+    return _coerce_int(value, field_name)
+
+
 def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[str, Any]) -> MIAConfig:
     datasets = spec.dataset_map()
     dataset_name = _require_choice("dataset", values.get("dataset"), set(datasets))
@@ -497,6 +526,15 @@ def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[s
         num_masks=_coerce_int(values.get("num_masks"), "num_masks"),
         retriever_k=_coerce_int(values.get("retriever_k"), "retriever_k"),
         gamma=_coerce_float(values.get("gamma", spec.runtime.gamma), "gamma"),
+        calibration_size=_coerce_int(values.get("calibration_size", dataset.calibration_size), "calibration_size"),
+        calibrate_threshold=bool(values.get("calibrate_threshold", spec.runtime.calibrate_threshold)),
+        bootstrap_iterations=_coerce_int(
+            values.get("bootstrap_iterations", spec.runtime.bootstrap_iterations),
+            "bootstrap_iterations",
+        ),
+        avoid_query_answer_leakage=bool(
+            values.get("avoid_query_answer_leakage", spec.runtime.avoid_query_answer_leakage)
+        ),
         masking_strategy=spec.runtime.masking_strategy,
         use_spelling_correction=spec.runtime.use_spelling_correction,
         retriever_type=retriever_name,
@@ -504,6 +542,8 @@ def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[s
         eval_size=_coerce_int(values.get("eval_size", dataset.eval_size), "eval_size"),
         min_chars=dataset.min_chars,
         max_chars=dataset.max_chars,
+        chunk_chars=_coerce_optional_int(values.get("chunk_chars", dataset.chunk_chars), "chunk_chars"),
+        chunk_overlap=_coerce_int(values.get("chunk_overlap", dataset.chunk_overlap), "chunk_overlap"),
         seed=_coerce_int(values.get("seed", dataset_seed), "seed"),
         llm_temperature=spec.runtime.llm_temperature,
     )
@@ -544,6 +584,13 @@ def _expand_legacy_configs(spec: ExperimentSpec) -> list[MIAConfig]:
                                     num_masks=num_masks,
                                     retriever_k=retriever_k,
                                     gamma=spec.runtime.gamma,
+                                    calibration_size=dataset.calibration_size,
+                                    calibrate_threshold=bool(spec.runtime.calibrate_threshold),
+                                    bootstrap_iterations=_coerce_int(
+                                        spec.runtime.bootstrap_iterations,
+                                        "bootstrap_iterations",
+                                    ),
+                                    avoid_query_answer_leakage=bool(spec.runtime.avoid_query_answer_leakage),
                                     masking_strategy=spec.runtime.masking_strategy,
                                     use_spelling_correction=spec.runtime.use_spelling_correction,
                                     retriever_type=retriever,
@@ -551,6 +598,8 @@ def _expand_legacy_configs(spec: ExperimentSpec) -> list[MIAConfig]:
                                     eval_size=dataset.eval_size,
                                     min_chars=dataset.min_chars,
                                     max_chars=dataset.max_chars,
+                                    chunk_chars=dataset.chunk_chars,
+                                    chunk_overlap=dataset.chunk_overlap,
                                     seed=dataset_seed,
                                     llm_temperature=spec.runtime.llm_temperature,
                                 )
