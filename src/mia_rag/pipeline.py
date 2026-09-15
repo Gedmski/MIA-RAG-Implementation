@@ -30,6 +30,16 @@ class MaskQualityDiagnostics:
     mask_count: int
 
 
+@dataclass(frozen=True)
+class RAGQueryResult:
+    response: str
+    retrieved_ids: list[str]
+    context_ids: list[str]
+    context: str
+    raw_context: str
+    retrieval_overlap_score: float
+
+
 COMMON_MASK_ANSWERS = {
     "about",
     "after",
@@ -87,6 +97,60 @@ def _primary_answers(ground_truth: dict[str, list[str]]) -> list[str]:
         if valid_answers:
             answers.append(valid_answers[0])
     return answers
+
+
+def _all_answers(ground_truth: dict[str, list[str]]) -> list[str]:
+    return [answer for valid_answers in ground_truth.values() for answer in valid_answers if answer]
+
+
+def redact_answers_from_context(context: str, ground_truth: dict[str, list[str]]) -> str:
+    redacted = context
+    answers = sorted({_normalize_answer(answer) for answer in _all_answers(ground_truth)}, key=len, reverse=True)
+    for answer in answers:
+        if answer:
+            redacted = re.sub(rf"(?<!\w){re.escape(answer)}(?!\w)", "[REDACTED]", redacted, flags=re.IGNORECASE)
+    return redacted
+
+
+def retrieval_overlap_score(masked_text: str, documents: list[Any]) -> float:
+    query_without_masks = re.sub(r"\[MASK_\d+\]", " ", masked_text, flags=re.IGNORECASE)
+    query_tokens = set(_normalize_answer(query_without_masks).split())
+    if not query_tokens:
+        return 0.0
+
+    best = 0.0
+    for document in documents:
+        document_tokens = set(_normalize_answer(str(document.page_content)).split())
+        if not document_tokens:
+            continue
+        best = max(best, len(query_tokens & document_tokens) / len(query_tokens | document_tokens))
+    return float(best)
+
+
+def select_context_documents(
+    candidates: list[Any],
+    *,
+    context_mode: str,
+    retriever_k: int,
+    target_doc_id: str,
+    ground_truth: dict[str, list[str]],
+) -> list[Any]:
+    if context_mode == "none":
+        return []
+    if context_mode != "leave_one_chunk_out":
+        return candidates[:retriever_k]
+
+    answers = _primary_answers(ground_truth)
+    selected: list[Any] = []
+    for document in candidates:
+        parent_id = str(document.metadata.get("parent_id", document.metadata.get("id", "")))
+        contains_answer = any(_text_contains_answer(str(document.page_content), answer) for answer in answers)
+        if parent_id == str(target_doc_id) and contains_answer:
+            continue
+        selected.append(document)
+        if len(selected) >= retriever_k:
+            break
+    return selected
 
 
 def evaluate_mask_quality(
@@ -184,6 +248,9 @@ def aggregate_attack_diagnostics(
     return {
         "member_mean_mask_accuracy": _mean_metric(member_results, "mask_acc"),
         "non_member_mean_mask_accuracy": _mean_metric(non_member_results, "mask_acc"),
+        "member_mean_retrieval_overlap_score": _mean_metric(member_results, "retrieval_overlap_score"),
+        "non_member_mean_retrieval_overlap_score": _mean_metric(non_member_results, "retrieval_overlap_score"),
+        "member_context_retrieval_recall": _mean_metric(member_results, "context_retrieval_hit"),
         "member_mean_format_coverage": _mean_metric(member_results, "format_coverage"),
         "non_member_mean_format_coverage": _mean_metric(non_member_results, "format_coverage"),
         "member_exact_reconstruction_rate": _mean_metric(member_results, "exact_reconstruction"),
@@ -192,6 +259,9 @@ def aggregate_attack_diagnostics(
         "non_member_query_answer_leakage_rate": _mean_metric(non_member_results, "query_answer_leakage"),
         "member_context_answer_coverage": _mean_metric(member_results, "context_answer_coverage"),
         "non_member_context_answer_coverage": _mean_metric(non_member_results, "context_answer_coverage"),
+        "member_raw_context_answer_coverage": _mean_metric(member_results, "raw_context_answer_coverage"),
+        "non_member_raw_context_answer_coverage": _mean_metric(non_member_results, "raw_context_answer_coverage"),
+        "mean_masks_per_sample": _mean_metric(member_results + non_member_results, "mask_count"),
         "member_short_answer_rate": _mean_metric(member_results, "short_answer_rate"),
         "non_member_short_answer_rate": _mean_metric(non_member_results, "short_answer_rate"),
         "member_common_answer_rate": _mean_metric(member_results, "common_answer_rate"),
@@ -582,24 +652,59 @@ class RAGSystem:
                     )
                 )
 
+        self.retrieval_candidate_k = min(
+            len(langchain_docs),
+            max(config.retriever_k, config.retriever_k * 4),
+        )
         if config.retriever_type == "bm25":
             from langchain_community.retrievers import BM25Retriever
 
             self.vector_store = None
             self.retriever = BM25Retriever.from_documents(langchain_docs)
-            self.retriever.k = config.retriever_k
+            self.retriever.k = self.retrieval_candidate_k
         else:
             self.vector_store = FAISS.from_documents(langchain_docs, self.embeddings)
-            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": config.retriever_k})
+            self.retriever = self.vector_store.as_retriever(search_kwargs={"k": self.retrieval_candidate_k})
 
         self.llm = build_llm(config)
 
-    def query(self, masked_text: str) -> tuple[str, list[str], str]:
-        docs = self.retriever.invoke(masked_text)
-        retrieved_ids = [str(document.metadata.get("parent_id", document.metadata.get("id", ""))) for document in docs]
-        context = "\n\n".join(document.page_content for document in docs)
+    def query(
+        self,
+        masked_text: str,
+        *,
+        ground_truth: dict[str, list[str]] | None = None,
+        target_doc_id: str = "",
+    ) -> RAGQueryResult:
+        ground_truth = ground_truth or {}
+        candidates = list(self.retriever.invoke(masked_text))
+        raw_docs = candidates[: self.config.retriever_k]
+        context_docs = select_context_documents(
+            candidates,
+            context_mode=self.config.context_mode,
+            retriever_k=self.config.retriever_k,
+            target_doc_id=target_doc_id,
+            ground_truth=ground_truth,
+        )
+        retrieved_ids = [
+            str(document.metadata.get("parent_id", document.metadata.get("id", "")))
+            for document in raw_docs
+        ]
+        context_ids = [
+            str(document.metadata.get("parent_id", document.metadata.get("id", "")))
+            for document in context_docs
+        ]
+        raw_context = "\n\n".join(str(document.page_content) for document in raw_docs)
+        context = "\n\n".join(str(document.page_content) for document in context_docs)
+        if self.config.context_mode == "answer_censored":
+            context = redact_answers_from_context(context, ground_truth)
+
+        context_instruction = (
+            "Use your language knowledge to identify the original words. No retrieved context is available."
+            if self.config.context_mode == "none"
+            else "Use the provided context to identify the original words."
+        )
         if "phi" in self.config.llm_model.lower():
-            prompt = f"""Instruct: You are a helpful assistant. Below is a text with missing words marked as [MASK_N]. Use the provided Context to identify the missing words.
+            prompt = f"""Instruct: You are a helpful assistant. Below is a text with missing words marked as [MASK_N]. {context_instruction}
 
 Context: {context[:2000]}...
 
@@ -610,7 +715,7 @@ Format your output strictly as:
 [MASK_2]: <word>
 """
         else:
-            prompt = f"""You are a helper. The following text contains masked words like [MASK_1]. Using the context provided, identify the original words.
+            prompt = f"""You are a helper. The following text contains masked words like [MASK_1]. {context_instruction}
 
 Context:
 {context}
@@ -623,7 +728,14 @@ Please list the answers for each mask. Format:
 [MASK_2]: answer_word
 """
         response = self.llm.invoke(prompt)
-        return response, retrieved_ids, context
+        return RAGQueryResult(
+            response=response,
+            retrieved_ids=retrieved_ids,
+            context_ids=context_ids,
+            context=context,
+            raw_context=raw_context,
+            retrieval_overlap_score=retrieval_overlap_score(masked_text, raw_docs),
+        )
 
 
 class MIAAttacker:
@@ -651,19 +763,29 @@ class MIAAttacker:
         membership_label = 1 if is_member else 0
         threshold = self.config.gamma if decision_threshold is None else decision_threshold
         for document in target_docs:
+            requested_masks = self.config.num_masks
+            if self.config.mask_fraction is not None:
+                requested_masks = max(1, round(len(document.text.split()) * self.config.mask_fraction))
             masked_text, ground_truth = self.mask_generator.generate_masks(
                 document.text,
-                num_masks=self.config.num_masks,
+                num_masks=requested_masks,
                 strategy=self.config.masking_strategy,
             )
             if not ground_truth:
                 continue
-            response, retrieved_ids, retrieved_context = rag.query(masked_text)
-            diagnostics = self.evaluate_correctness(response, ground_truth)
-            mask_quality = evaluate_mask_quality(masked_text, ground_truth, retrieved_context)
-            retrieval_hit = float(str(document.doc_id) in retrieved_ids) if is_member else 0.0
+            query_result = rag.query(
+                masked_text,
+                ground_truth=ground_truth,
+                target_doc_id=str(document.doc_id),
+            )
+            diagnostics = self.evaluate_correctness(query_result.response, ground_truth)
+            mask_quality = evaluate_mask_quality(masked_text, ground_truth, query_result.context)
+            raw_mask_quality = evaluate_mask_quality(masked_text, ground_truth, query_result.raw_context)
+            retrieval_hit = float(str(document.doc_id) in query_result.retrieved_ids)
+            context_retrieval_hit = float(str(document.doc_id) in query_result.context_ids)
             results.append(
                 {
+                    "doc_id": str(document.doc_id),
                     "is_member": membership_label,
                     "mask_acc": diagnostics.mask_accuracy,
                     "correct_mask_count": diagnostics.correct_mask_count,
@@ -671,10 +793,13 @@ class MIAAttacker:
                     "format_coverage": diagnostics.format_coverage,
                     "retrieval_recall": retrieval_hit,
                     "retrieval_hit": retrieval_hit,
+                    "context_retrieval_hit": context_retrieval_hit,
+                    "retrieval_overlap_score": query_result.retrieval_overlap_score,
                     "response_len": diagnostics.response_len,
                     "exact_reconstruction": float(diagnostics.mask_accuracy >= 1.0),
                     "query_answer_leakage": mask_quality.query_answer_leakage,
                     "context_answer_coverage": mask_quality.context_answer_coverage,
+                    "raw_context_answer_coverage": raw_mask_quality.context_answer_coverage,
                     "short_answer_rate": mask_quality.short_answer_rate,
                     "common_answer_rate": mask_quality.common_answer_rate,
                     "mask_count": mask_quality.mask_count,
@@ -801,6 +926,14 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
     y_true = [item["is_member"] for item in all_results]
     y_scores = [item["mask_acc"] for item in all_results]
     metrics = compute_membership_metrics(y_true, y_scores, effective_gamma)
+    retrieval_scores = [item["retrieval_overlap_score"] for item in all_results]
+    retrieval_only_auc = _roc_auc_score(y_true, retrieval_scores)
+    retrieval_auc_ci_low, retrieval_auc_ci_high = bootstrap_auc_ci(
+        y_true,
+        retrieval_scores,
+        config.bootstrap_iterations,
+        config.seed + 17,
+    )
     calibration_metrics = (
         compute_membership_metrics(
             [item["is_member"] for item in calibration_results],
@@ -852,6 +985,8 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "calibration_size": config.calibration_size,
         "bootstrap_iterations": config.bootstrap_iterations,
         "avoid_query_answer_leakage": config.avoid_query_answer_leakage,
+        "context_mode": config.context_mode,
+        "mask_fraction": config.mask_fraction,
         "chunk_chars": config.chunk_chars,
         "chunk_overlap": config.chunk_overlap,
         "index_size": config.index_size,
@@ -864,6 +999,9 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "auc_ci_low": auc_ci_low,
         "auc_ci_high": auc_ci_high,
         "pr_auc": metrics["pr_auc"],
+        "retrieval_only_auc": retrieval_only_auc,
+        "retrieval_only_auc_ci_low": retrieval_auc_ci_low,
+        "retrieval_only_auc_ci_high": retrieval_auc_ci_high,
         "balanced_accuracy": metrics["balanced_accuracy"],
         "tpr_at_1_fpr": metrics["tpr_at_1_fpr"],
         "tpr_at_5_fpr": metrics["tpr_at_5_fpr"],
@@ -875,8 +1013,11 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "calibration_pr_auc": calibration_metrics["pr_auc"] if calibration_metrics else None,
         "calibration_f1": calibration_metrics["f1"] if calibration_metrics else None,
         "retrieval_recall": float(avg_recall),
+        "context_retrieval_recall": diagnostics["member_context_retrieval_recall"],
         "member_mean_mask_accuracy": diagnostics["member_mean_mask_accuracy"],
         "non_member_mean_mask_accuracy": diagnostics["non_member_mean_mask_accuracy"],
+        "member_mean_retrieval_overlap_score": diagnostics["member_mean_retrieval_overlap_score"],
+        "non_member_mean_retrieval_overlap_score": diagnostics["non_member_mean_retrieval_overlap_score"],
         "member_mean_format_coverage": diagnostics["member_mean_format_coverage"],
         "non_member_mean_format_coverage": diagnostics["non_member_mean_format_coverage"],
         "member_exact_reconstruction_rate": diagnostics["member_exact_reconstruction_rate"],
@@ -885,6 +1026,9 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "non_member_query_answer_leakage_rate": diagnostics["non_member_query_answer_leakage_rate"],
         "member_context_answer_coverage": diagnostics["member_context_answer_coverage"],
         "non_member_context_answer_coverage": diagnostics["non_member_context_answer_coverage"],
+        "member_raw_context_answer_coverage": diagnostics["member_raw_context_answer_coverage"],
+        "non_member_raw_context_answer_coverage": diagnostics["non_member_raw_context_answer_coverage"],
+        "mean_masks_per_sample": diagnostics["mean_masks_per_sample"],
         "member_short_answer_rate": diagnostics["member_short_answer_rate"],
         "non_member_short_answer_rate": diagnostics["non_member_short_answer_rate"],
         "member_common_answer_rate": diagnostics["member_common_answer_rate"],
@@ -894,4 +1038,5 @@ def run_single_experiment(config: MIAConfig, split: DatasetSplit) -> dict[str, A
         "runtime_seconds": round(runtime_seconds, 4),
         "failure_reason": "",
         "config_repr": config.compat_repr(),
+        "sample_results": all_results,
     }

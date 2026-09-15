@@ -20,6 +20,7 @@ COMMON_REQUIRED_TOP_LEVEL_KEYS = {
 LEGACY_REQUIRED_KEY = "sweeps"
 STUDY_REQUIRED_KEY = "studies"
 LEGACY_STUDY_NAME = "default_sweep"
+CONTEXT_MODES = {"full", "none", "answer_censored", "leave_one_chunk_out"}
 SUPPORTED_STUDY_FIELDS = {
     "dataset",
     "model",
@@ -34,6 +35,8 @@ SUPPORTED_STUDY_FIELDS = {
     "calibrate_threshold",
     "bootstrap_iterations",
     "avoid_query_answer_leakage",
+    "context_mode",
+    "mask_fraction",
     "chunk_chars",
     "chunk_overlap",
     "seed",
@@ -117,6 +120,8 @@ class RuntimeConfig:
     calibrate_threshold: bool = True
     bootstrap_iterations: int = 200
     avoid_query_answer_leakage: bool = True
+    context_mode: str = "full"
+    mask_fraction: float | None = None
     continue_on_error: bool = True
     limit_runs: int | None = None
     llm_temperature: float = 0.0
@@ -203,15 +208,19 @@ class MIAConfig:
     chunk_chars: int | None
     chunk_overlap: int
     seed: int
+    context_mode: str = "full"
+    mask_fraction: float | None = None
     llm_temperature: float = 0.0
 
     def compat_repr(self) -> str:
         chunk_text = f", Chunk={self.chunk_chars}/{self.chunk_overlap}" if self.chunk_chars else ""
         leakage_text = ", NoQueryLeak" if self.avoid_query_answer_leakage else ""
+        mask_text = f", MaskFraction={self.mask_fraction:.2f}" if self.mask_fraction is not None else ""
         return (
             f"Config(LLM={self.llm_model}, Data={self.dataset_name}, Emb={self.embedding_model}, "
             f"Ret={self.retriever_type}, M={self.num_masks}, K={self.retriever_k}, "
-            f"Idx={self.index_size}, Eval={self.eval_size}, Cal={self.calibration_size}{chunk_text}{leakage_text})"
+            f"Context={self.context_mode}, Idx={self.index_size}, Eval={self.eval_size}, "
+            f"Cal={self.calibration_size}{chunk_text}{mask_text}{leakage_text})"
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -481,6 +490,23 @@ def _coerce_optional_int(value: Any, field_name: str) -> int | None:
     return _coerce_int(value, field_name)
 
 
+def _coerce_optional_fraction(value: Any, field_name: str) -> float | None:
+    if value is None or value == "":
+        return None
+    fraction = _coerce_float(value, field_name)
+    if not 0.0 < fraction <= 1.0:
+        raise ValueError(f"Field '{field_name}' must be greater than 0 and at most 1, got {value!r}")
+    return fraction
+
+
+def _coerce_context_mode(value: Any) -> str:
+    mode = str(value or "full")
+    if mode not in CONTEXT_MODES:
+        available = ", ".join(sorted(CONTEXT_MODES))
+        raise ValueError(f"Unknown context_mode '{mode}'. Available values: {available}")
+    return mode
+
+
 def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[str, Any]) -> MIAConfig:
     datasets = spec.dataset_map()
     dataset_name = _require_choice("dataset", values.get("dataset"), set(datasets))
@@ -545,6 +571,11 @@ def _resolve_study_config(spec: ExperimentSpec, study: StudySpec, values: dict[s
         chunk_chars=_coerce_optional_int(values.get("chunk_chars", dataset.chunk_chars), "chunk_chars"),
         chunk_overlap=_coerce_int(values.get("chunk_overlap", dataset.chunk_overlap), "chunk_overlap"),
         seed=_coerce_int(values.get("seed", dataset_seed), "seed"),
+        context_mode=_coerce_context_mode(values.get("context_mode", spec.runtime.context_mode)),
+        mask_fraction=_coerce_optional_fraction(
+            values.get("mask_fraction", spec.runtime.mask_fraction),
+            "mask_fraction",
+        ),
         llm_temperature=spec.runtime.llm_temperature,
     )
 
@@ -601,6 +632,11 @@ def _expand_legacy_configs(spec: ExperimentSpec) -> list[MIAConfig]:
                                     chunk_chars=dataset.chunk_chars,
                                     chunk_overlap=dataset.chunk_overlap,
                                     seed=dataset_seed,
+                                    context_mode=_coerce_context_mode(spec.runtime.context_mode),
+                                    mask_fraction=_coerce_optional_fraction(
+                                        spec.runtime.mask_fraction,
+                                        "mask_fraction",
+                                    ),
                                     llm_temperature=spec.runtime.llm_temperature,
                                 )
                             )

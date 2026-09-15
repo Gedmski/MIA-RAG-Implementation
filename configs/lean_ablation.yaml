@@ -147,6 +147,8 @@ runtime:
   calibrate_threshold: true
   bootstrap_iterations: 200
   avoid_query_answer_leakage: true
+  context_mode: full
+  mask_fraction:
   continue_on_error: true
   limit_runs:
   llm_temperature: 0.0
@@ -289,6 +291,26 @@ studies:
       index_size:
         - 500
         - 2000
+      seed:
+        - 42
+        - 1337
+
+  context_exposure_controls:
+    description: Separate full RAG exposure from retrieval-only and generator-side reconstruction effects.
+    overrides:
+      dataset: healthcaremagic
+      model: gpt-4o-mini
+      retriever: faiss
+      embedding: bge-small-en-v1.5
+      num_masks: 10
+      retriever_k: 5
+      mask_fraction: 0.20
+    sweep:
+      context_mode:
+        - full
+        - none
+        - answer_censored
+        - leave_one_chunk_out
       seed:
         - 42
         - 1337

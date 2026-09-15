@@ -36,6 +36,8 @@ SUMMARY_COLUMNS = [
     "calibration_size",
     "bootstrap_iterations",
     "avoid_query_answer_leakage",
+    "context_mode",
+    "mask_fraction",
     "chunk_chars",
     "chunk_overlap",
     "index_size",
@@ -48,6 +50,9 @@ SUMMARY_COLUMNS = [
     "auc_ci_low",
     "auc_ci_high",
     "pr_auc",
+    "retrieval_only_auc",
+    "retrieval_only_auc_ci_low",
+    "retrieval_only_auc_ci_high",
     "balanced_accuracy",
     "tpr_at_1_fpr",
     "tpr_at_5_fpr",
@@ -59,8 +64,11 @@ SUMMARY_COLUMNS = [
     "calibration_pr_auc",
     "calibration_f1",
     "retrieval_recall",
+    "context_retrieval_recall",
     "member_mean_mask_accuracy",
     "non_member_mean_mask_accuracy",
+    "member_mean_retrieval_overlap_score",
+    "non_member_mean_retrieval_overlap_score",
     "member_mean_format_coverage",
     "non_member_mean_format_coverage",
     "member_exact_reconstruction_rate",
@@ -69,6 +77,9 @@ SUMMARY_COLUMNS = [
     "non_member_query_answer_leakage_rate",
     "member_context_answer_coverage",
     "non_member_context_answer_coverage",
+    "member_raw_context_answer_coverage",
+    "non_member_raw_context_answer_coverage",
+    "mean_masks_per_sample",
     "member_short_answer_rate",
     "non_member_short_answer_rate",
     "member_common_answer_rate",
@@ -91,6 +102,7 @@ NUMERIC_COLUMNS = [
     "configured_gamma",
     "calibration_size",
     "bootstrap_iterations",
+    "mask_fraction",
     "chunk_chars",
     "chunk_overlap",
     "index_size",
@@ -103,6 +115,9 @@ NUMERIC_COLUMNS = [
     "auc_ci_low",
     "auc_ci_high",
     "pr_auc",
+    "retrieval_only_auc",
+    "retrieval_only_auc_ci_low",
+    "retrieval_only_auc_ci_high",
     "balanced_accuracy",
     "tpr_at_1_fpr",
     "tpr_at_5_fpr",
@@ -114,9 +129,12 @@ NUMERIC_COLUMNS = [
     "calibration_pr_auc",
     "calibration_f1",
     "retrieval_recall",
+    "context_retrieval_recall",
     "model_params_b",
     "member_mean_mask_accuracy",
     "non_member_mean_mask_accuracy",
+    "member_mean_retrieval_overlap_score",
+    "non_member_mean_retrieval_overlap_score",
     "member_mean_format_coverage",
     "non_member_mean_format_coverage",
     "member_exact_reconstruction_rate",
@@ -125,6 +143,9 @@ NUMERIC_COLUMNS = [
     "non_member_query_answer_leakage_rate",
     "member_context_answer_coverage",
     "non_member_context_answer_coverage",
+    "member_raw_context_answer_coverage",
+    "non_member_raw_context_answer_coverage",
+    "mean_masks_per_sample",
     "member_short_answer_rate",
     "non_member_short_answer_rate",
     "member_common_answer_rate",
@@ -292,6 +313,8 @@ def _append_dataset_sections(lines: list[str], dataframe: pd.DataFrame) -> None:
 
         best_worst_columns = [
             "llm_model",
+            "context_mode",
+            "mask_fraction",
             "retriever_type",
             "embedding_model",
             "num_masks",
@@ -302,9 +325,11 @@ def _append_dataset_sections(lines: list[str], dataframe: pd.DataFrame) -> None:
             "auc_ci_low",
             "auc_ci_high",
             "pr_auc",
+            "retrieval_only_auc",
             "tpr_at_5_fpr",
             "f1",
             "member_context_answer_coverage",
+            "member_raw_context_answer_coverage",
             "non_member_context_answer_coverage",
             "member_query_answer_leakage_rate",
         ]
@@ -422,11 +447,57 @@ def _append_domain_stack_control_section(lines: list[str], dataframe: pd.DataFra
     )
 
 
+def _append_context_exposure_section(lines: list[str], dataframe: pd.DataFrame) -> None:
+    required = {"dataset", "context_mode", "auc", "retrieval_only_auc"}
+    if not required.issubset(dataframe.columns):
+        return
+    metrics = [
+        "auc",
+        "retrieval_only_auc",
+        "f1",
+        "member_context_answer_coverage",
+        "member_raw_context_answer_coverage",
+        "member_mean_mask_accuracy",
+        "non_member_mean_mask_accuracy",
+    ]
+    available_metrics = [metric for metric in metrics if metric in dataframe.columns]
+    grouped = (
+        dataframe.groupby(["dataset", "context_mode"], dropna=False)[available_metrics]
+        .mean()
+        .reset_index()
+        .sort_values(["dataset", "context_mode"])
+    )
+    lines.extend(
+        [
+            "### Context Exposure Controls",
+            "",
+            _format_table(
+                grouped.rename(
+                    columns={
+                        "dataset": "Dataset",
+                        "context_mode": "Context Mode",
+                        "auc": "MBMIA AUC",
+                        "retrieval_only_auc": "Retrieval-only AUC",
+                        "f1": "F1",
+                        "member_context_answer_coverage": "Effective Member Answer Coverage",
+                        "member_raw_context_answer_coverage": "Raw Member Answer Coverage",
+                        "member_mean_mask_accuracy": "Member Mask Accuracy",
+                        "non_member_mean_mask_accuracy": "Non-member Mask Accuracy",
+                    }
+                )
+            ),
+            "",
+        ]
+    )
+
+
 def _append_study_specific_sections(lines: list[str], study_name: str, dataframe: pd.DataFrame) -> None:
     if study_name == "ablation_model_scale":
         _append_model_scale_section(lines, dataframe)
     if study_name == "ablation_domain_stack_control":
         _append_domain_stack_control_section(lines, dataframe)
+    if study_name == "context_exposure_controls":
+        _append_context_exposure_section(lines, dataframe)
 
 
 def generate_report(dataframe: pd.DataFrame, output_path: str | Path) -> None:

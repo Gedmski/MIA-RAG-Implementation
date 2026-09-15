@@ -22,6 +22,10 @@ CONTROL_COLUMNS = {
     "non_member_query_answer_leakage_rate",
     "member_context_answer_coverage",
     "non_member_context_answer_coverage",
+    "member_raw_context_answer_coverage",
+    "non_member_raw_context_answer_coverage",
+    "context_mode",
+    "retrieval_only_auc",
     "member_common_answer_rate",
 }
 
@@ -83,6 +87,7 @@ def audit_rows(rows: list[dict[str, str]]) -> list[str]:
         retrieval_recall = _float_any(row, ["retrieval_recall", "Retrieval Recall"])
         threshold_source = row.get("threshold_source", "")
         study_name = row.get("study_name", "")
+        context_mode = row.get("context_mode", "")
 
         if threshold_source and threshold_source != "calibration" and study_name != "ablation_gamma":
             messages.append(f"WARNING: {label}: threshold_source={threshold_source!r} outside gamma study")
@@ -132,6 +137,7 @@ def audit_rows(rows: list[dict[str, str]]) -> list[str]:
 
         low_fpr_tpr = _float(row, "tpr_at_5_fpr")
         member_context_coverage = _float(row, "member_context_answer_coverage")
+        retrieval_only_auc = _float(row, "retrieval_only_auc")
         if auc is not None and auc >= 0.98 and retrieval_recall is not None and retrieval_recall >= 0.99:
             near_ceiling_labels.append(label)
         if (
@@ -143,6 +149,16 @@ def audit_rows(rows: list[dict[str, str]]) -> list[str]:
             messages.append(
                 f"WARNING: {label}: near-ceiling AUC with near-complete answer coverage in retrieved context "
                 f"({member_context_coverage:.4f})"
+            )
+        if auc is not None and auc >= 0.90 and retrieval_only_auc is not None and retrieval_only_auc >= auc - 0.02:
+            messages.append(
+                f"WARNING: {label}: retrieval-only AUC ({retrieval_only_auc:.4f}) is within 0.02 of "
+                f"MBMIA AUC ({auc:.4f}); the generator may add little beyond retrieval overlap"
+            )
+        if context_mode in {"none", "answer_censored", "leave_one_chunk_out"} and member_context_coverage:
+            messages.append(
+                f"WARNING: {label}: context_mode={context_mode!r} still exposes masked answers "
+                f"at rate {member_context_coverage:.4f}"
             )
         if auc is not None and auc >= 0.90 and low_fpr_tpr is not None and low_fpr_tpr < 0.10:
             messages.append(f"WARNING: {label}: high AUC but weak TPR at 5% FPR ({low_fpr_tpr:.4f})")

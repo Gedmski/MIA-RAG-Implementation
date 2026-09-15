@@ -19,6 +19,9 @@ from mia_rag.pipeline import (
     compute_membership_metrics,
     evaluate_mask_quality,
     evaluate_reconstruction,
+    redact_answers_from_context,
+    retrieval_overlap_score,
+    select_context_documents,
     select_decision_threshold,
 )
 from mia_rag.types import DocumentRecord
@@ -34,6 +37,7 @@ def _validate_configs() -> None:
         "configs/smoke.yaml": (5, 500, True, True),
         "configs/lean_ablation.yaml": (25, 800, True, True),
         "configs/default.yaml": (25, 800, True, True),
+        "configs/publication_controls.yaml": (100, 500, True, True),
     }
     for config_name, (calibration_size, chunk_chars, calibrate_threshold, avoid_leakage) in expected.items():
         spec = load_experiment_spec(ROOT / config_name)
@@ -44,11 +48,17 @@ def _validate_configs() -> None:
         _assert(first.chunk_chars == chunk_chars, f"{config_name} chunk_chars mismatch")
         _assert(first.calibrate_threshold is calibrate_threshold, f"{config_name} calibration flag mismatch")
         _assert(first.avoid_query_answer_leakage is avoid_leakage, f"{config_name} leakage-prevention flag mismatch")
+        _assert(first.context_mode in {"full", "none", "answer_censored", "leave_one_chunk_out"}, f"{config_name} context mode mismatch")
 
     lean_spec = load_experiment_spec(ROOT / "configs/lean_ablation.yaml")
     studies = {study.name: study for study in expand_experiment_studies(lean_spec)}
     _assert(studies["baseline_reproduction"].configs[0].calibrate_threshold is True, "baseline must calibrate")
     _assert(studies["ablation_gamma"].configs[0].calibrate_threshold is False, "gamma study must be fixed-threshold")
+
+    publication_spec = load_experiment_spec(ROOT / "configs/publication_controls.yaml")
+    publication_configs = expand_experiment_configs(publication_spec)
+    _assert(len(publication_configs) == 40, "publication context study must resolve 40 runs")
+    _assert({config.seed for config in publication_configs} == {42, 1337, 2027, 31415, 65537}, "publication seeds mismatch")
 
 
 def _validate_splits() -> None:
@@ -97,6 +107,32 @@ def _validate_scoring_and_chunking() -> None:
     counts = _answer_occurrence_counts("insulin lowers glucose but insulin can vary".split())
     _assert(_is_non_leaking_mask_candidate("glucose", counts), "unique answer was rejected")
     _assert(not _is_non_leaking_mask_candidate("insulin", counts), "repeated answer was accepted")
+
+    redacted = redact_answers_from_context(
+        "The patient takes insulin daily.",
+        {"[MASK_1]": ["insulin"]},
+    )
+    _assert("insulin" not in redacted.lower(), "answer-censored context still contains the answer")
+
+    class Candidate:
+        def __init__(self, text: str, parent_id: str):
+            self.page_content = text
+            self.metadata = {"parent_id": parent_id}
+
+    candidates = [
+        Candidate("The insulin dose changed.", "member-1"),
+        Candidate("Follow-up is scheduled tomorrow.", "member-1"),
+        Candidate("An unrelated clinical note.", "member-2"),
+    ]
+    selected = select_context_documents(
+        candidates,
+        context_mode="leave_one_chunk_out",
+        retriever_k=2,
+        target_doc_id="member-1",
+        ground_truth={"[MASK_1]": ["insulin"]},
+    )
+    _assert(len(selected) == 2 and "insulin" not in selected[0].page_content.lower(), "answer chunk exclusion failed")
+    _assert(retrieval_overlap_score("The [MASK_1] dose changed.", candidates) > 0.0, "retrieval-only score missing")
 
 
 def main() -> int:

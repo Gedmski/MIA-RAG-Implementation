@@ -37,6 +37,8 @@ def test_load_experiment_spec_and_expand_smoke_config():
     assert first.calibrate_threshold is True
     assert first.bootstrap_iterations == 100
     assert first.avoid_query_answer_leakage is True
+    assert first.context_mode == "full"
+    assert first.mask_fraction is None
     assert first.chunk_chars == 500
     assert first.chunk_overlap == 75
 
@@ -313,3 +315,24 @@ def test_lean_ablation_includes_new_scale_and_domain_control_studies():
     assert len(studies["ablation_domain_stack_control"].configs) == 12
     assert studies["baseline_reproduction"].configs[0].calibrate_threshold is True
     assert studies["ablation_gamma"].configs[0].calibrate_threshold is False
+    assert "context_exposure_controls" in studies
+    assert len(studies["context_exposure_controls"].configs) == 8
+    assert {config.context_mode for config in studies["context_exposure_controls"].configs} == {
+        "full",
+        "none",
+        "answer_censored",
+        "leave_one_chunk_out",
+    }
+    assert {config.mask_fraction for config in studies["context_exposure_controls"].configs} == {0.2}
+
+
+def test_publication_control_config_uses_large_repeated_context_sweep():
+    spec = load_experiment_spec(ROOT / "configs" / "publication_controls.yaml")
+    studies = expand_experiment_studies(spec)
+    assert len(studies) == 1
+    configs = studies[0].configs
+    assert len(configs) == 40
+    assert {config.index_size for config in configs} == {2000}
+    assert {config.eval_size for config in configs} == {200}
+    assert {config.calibration_size for config in configs} == {100}
+    assert {config.seed for config in configs} == {42, 1337, 2027, 31415, 65537}

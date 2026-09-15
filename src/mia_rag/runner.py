@@ -38,10 +38,11 @@ def _slugify(value: str) -> str:
 
 
 def _run_name(config: MIAConfig) -> str:
+    mask_spec = f"mf{config.mask_fraction:.2f}" if config.mask_fraction is not None else f"m{config.num_masks}"
     return (
         f"{_slugify(config.study_name)}-{_slugify(config.dataset_name)}-{_slugify(config.llm_model)}-"
         f"{_slugify(config.retriever_type)}-{_slugify(config.embedding_model)}-"
-        f"m{config.num_masks}-k{config.retriever_k}-g{config.gamma:.2f}-"
+        f"{mask_spec}-k{config.retriever_k}-g{config.gamma:.2f}-ctx{_slugify(config.context_mode)}-"
         f"idx{config.index_size}-eval{config.eval_size}-seed{config.seed}"
     )
 
@@ -111,6 +112,8 @@ def _build_failure_record(config: MIAConfig, started_at: datetime, finished_at: 
         "calibration_size": config.calibration_size,
         "bootstrap_iterations": config.bootstrap_iterations,
         "avoid_query_answer_leakage": config.avoid_query_answer_leakage,
+        "context_mode": config.context_mode,
+        "mask_fraction": config.mask_fraction,
         "chunk_chars": config.chunk_chars,
         "chunk_overlap": config.chunk_overlap,
         "index_size": config.index_size,
@@ -123,6 +126,9 @@ def _build_failure_record(config: MIAConfig, started_at: datetime, finished_at: 
         "auc_ci_low": None,
         "auc_ci_high": None,
         "pr_auc": None,
+        "retrieval_only_auc": None,
+        "retrieval_only_auc_ci_low": None,
+        "retrieval_only_auc_ci_high": None,
         "balanced_accuracy": None,
         "tpr_at_1_fpr": None,
         "tpr_at_5_fpr": None,
@@ -134,10 +140,16 @@ def _build_failure_record(config: MIAConfig, started_at: datetime, finished_at: 
         "calibration_pr_auc": None,
         "calibration_f1": None,
         "retrieval_recall": None,
+        "context_retrieval_recall": None,
+        "member_mean_retrieval_overlap_score": None,
+        "non_member_mean_retrieval_overlap_score": None,
         "member_query_answer_leakage_rate": None,
         "non_member_query_answer_leakage_rate": None,
         "member_context_answer_coverage": None,
         "non_member_context_answer_coverage": None,
+        "member_raw_context_answer_coverage": None,
+        "non_member_raw_context_answer_coverage": None,
+        "mean_masks_per_sample": None,
         "member_short_answer_rate": None,
         "non_member_short_answer_rate": None,
         "member_common_answer_rate": None,
@@ -151,6 +163,7 @@ def _build_failure_record(config: MIAConfig, started_at: datetime, finished_at: 
         "runtime_seconds": round((finished_at - started_at).total_seconds(), 4),
         "failure_reason": str(error),
         "config_repr": config.compat_repr(),
+        "sample_results": [],
     }
 
 
@@ -225,7 +238,8 @@ def _run_study(
             print(
                 f"[{study.name} {index}/{len(study.configs)}] dataset={config.dataset_name} model={config.llm_model} "
                 f"retriever={config.retriever_type} embedding={config.embedding_model} "
-                f"M={config.num_masks} K={config.retriever_k} gamma={config.gamma}"
+                f"M={config.num_masks} mask_fraction={config.mask_fraction} K={config.retriever_k} gamma={config.gamma} "
+                f"context={config.context_mode}"
             )
             cache_key = _dataset_cache_key(config)
             if cache_key not in dataset_cache:
