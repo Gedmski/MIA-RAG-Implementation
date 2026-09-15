@@ -19,6 +19,9 @@ from mia_rag.pipeline import (
     compute_membership_metrics,
     evaluate_reconstruction,
     evaluate_mask_quality,
+    redact_answers_from_context,
+    retrieval_overlap_score,
+    select_context_documents,
     _answer_occurrence_counts,
     _is_non_leaking_mask_candidate,
     select_decision_threshold,
@@ -74,7 +77,7 @@ def test_compute_membership_metrics_respects_gamma_threshold():
         gamma=0.7,
     )
     assert round(metrics["auc"], 4) == 0.75
-    assert round(metrics["accuracy"], 4) == 0.75
+    assert round(metrics["accuracy"], 4) == 0.5
     assert round(metrics["precision"], 4) == 0.5
     assert round(metrics["recall"], 4) == 0.5
     assert round(metrics["f1"], 4) == 0.5
@@ -175,6 +178,48 @@ def test_repeated_answers_are_not_non_leaking_mask_candidates():
 def test_chunk_document_text_uses_overlap():
     chunks = chunk_document_text("abcdefghijklmnopqrstuvwxyz", chunk_chars=10, chunk_overlap=2)
     assert chunks == ["abcdefghij", "ijklmnopqr", "qrstuvwxyz"]
+
+
+def test_answer_censoring_removes_ground_truth_words_only():
+    context = "The patient takes Insulin for diabetes and uses a pump."
+    redacted = redact_answers_from_context(context, {"[MASK_1]": ["insulin"]})
+    assert "insulin" not in redacted.lower()
+    assert "[REDACTED]" in redacted
+    assert "diabetes" in redacted
+
+
+def test_leave_one_chunk_out_excludes_answer_bearing_source_chunks():
+    candidates = [
+        types.SimpleNamespace(page_content="The insulin dose changed.", metadata={"parent_id": "member-1"}),
+        types.SimpleNamespace(page_content="Follow-up is scheduled tomorrow.", metadata={"parent_id": "member-1"}),
+        types.SimpleNamespace(page_content="An unrelated clinical note.", metadata={"parent_id": "member-2"}),
+    ]
+    selected = select_context_documents(
+        candidates,
+        context_mode="leave_one_chunk_out",
+        retriever_k=2,
+        target_doc_id="member-1",
+        ground_truth={"[MASK_1]": ["insulin"]},
+    )
+    assert [item.page_content for item in selected] == [
+        "Follow-up is scheduled tomorrow.",
+        "An unrelated clinical note.",
+    ]
+
+
+def test_no_context_selects_no_documents_but_retrieval_score_remains_available():
+    candidates = [
+        types.SimpleNamespace(page_content="The patient takes insulin daily.", metadata={"parent_id": "member-1"})
+    ]
+    selected = select_context_documents(
+        candidates,
+        context_mode="none",
+        retriever_k=1,
+        target_doc_id="member-1",
+        ground_truth={"[MASK_1]": ["insulin"]},
+    )
+    assert selected == []
+    assert retrieval_overlap_score("The patient takes [MASK_1] daily.", candidates) > 0.5
 
 
 def test_aggregate_attack_diagnostics_tracks_generation_failures():

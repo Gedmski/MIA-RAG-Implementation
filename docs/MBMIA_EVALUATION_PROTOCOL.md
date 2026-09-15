@@ -33,15 +33,30 @@ This protocol is the supported path for producing publishable mask-based members
    - Any non-zero masked-query answer leakage means the probe itself contains an answer elsewhere and should be treated as invalid or analyzed separately.
    - Near-ceiling AUC with near-complete member context answer coverage should be described as retrieval-context exposure, not as unexplained model memorization.
 
+7. Separate retrieval exposure from generator behavior.
+   - `context_mode: full` measures the end-to-end RAG exposure setting.
+   - `context_mode: none` measures reconstruction without retrieved context.
+   - `context_mode: answer_censored` retrieves normally but replaces every masked answer in the supplied context.
+   - `context_mode: leave_one_chunk_out` removes answer-bearing chunks from the target member document and refills context from the larger candidate pool.
+   - Compare MBMIA AUC with `retrieval_only_auc`, which ranks examples using masked-query overlap with the retrieved text.
+   - Report raw and effective context-answer coverage so censoring and chunk exclusion can be verified.
+
+8. Use adequate sampling and independent repetitions.
+   - Smoke results use only 10 evaluation examples per class and are not paper-facing estimates.
+   - The publication control config uses 200 evaluation and 100 calibration examples per class with 2,000 indexed documents.
+   - Average results across at least five dataset seeds; a bootstrap over one perfectly separated small sample is not a substitute for independent splits.
+   - Prefer fractional masking (for example, `mask_fraction: 0.20`) so probe difficulty scales with document length.
+
 ## Recommended Paper Workflow
 
 1. Run `python scripts/validate_mbmia_protocol.py` to confirm the protocol controls resolve correctly.
 2. Run `configs/smoke.yaml` to confirm the model, dataset, retriever, and reporting environment.
 3. Run `configs/lean_ablation.yaml` for the main paper tables.
-4. Use `summary.csv` and `runs.jsonl` from a single timestamped run directory as the source of truth.
-5. Run `python scripts/audit_mbmia_results.py results/YYYY-MM-DD/<run_id>/summary.csv --strict` before copying numbers into the manuscript.
-6. Report the effective `gamma`, `threshold_source`, calibration sample counts, chunking parameters, duplicate diagnostics, query leakage, and context answer coverage with each table or in an appendix.
-7. Treat the root `experiment_results.md`, `experiment_data.csv`, and `results_report.md` as compatibility mirrors only.
+4. Run `configs/publication_controls.yaml` before interpreting near-ceiling AUC as more than retrieval-context exposure.
+5. Use `summary.csv` and `runs.jsonl` from a single timestamped run directory as the source of truth. `runs.jsonl` includes aggregate metrics plus per-example diagnostic scores.
+6. Run `python scripts/audit_mbmia_results.py results/YYYY-MM-DD/<run_id>/summary.csv --strict` before copying numbers into the manuscript.
+7. Report the effective `gamma`, `threshold_source`, context mode, calibration sample counts, chunking parameters, duplicate diagnostics, retrieval-only AUC, query leakage, and both raw and effective context-answer coverage.
+8. Treat the root `experiment_results.md`, `experiment_data.csv`, and `results_report.md` as compatibility mirrors only.
 
 ## Interpretation Guardrails
 

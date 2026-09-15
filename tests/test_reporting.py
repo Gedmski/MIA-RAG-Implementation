@@ -359,3 +359,35 @@ def test_legacy_parser_reads_existing_format(tmp_path):
     assert len(dataframe) == 1
     assert dataframe.iloc[0]["Dataset"] == "healthcaremagic"
     assert float(dataframe.iloc[0]["AUC"]) == 0.9520
+
+
+def test_reporting_adds_context_exposure_comparison(tmp_path):
+    records = []
+    for context_mode, auc, effective_coverage in [
+        ("full", 0.99, 0.98),
+        ("none", 0.61, 0.0),
+        ("answer_censored", 0.66, 0.0),
+        ("leave_one_chunk_out", 0.70, 0.05),
+    ]:
+        record = dict(_sample_records()[0])
+        record.update(
+            {
+                "study_name": "context_exposure_controls",
+                "run_name": f"context-{context_mode}",
+                "context_mode": context_mode,
+                "auc": auc,
+                "retrieval_only_auc": 0.98,
+                "member_context_answer_coverage": effective_coverage,
+                "member_raw_context_answer_coverage": 0.98,
+            }
+        )
+        records.append(record)
+
+    runs_path = tmp_path / "runs.jsonl"
+    report_path = tmp_path / "context-report.md"
+    write_structured_records(records, runs_path)
+    generate_report(load_structured_records(runs_path), report_path)
+    report_text = report_path.read_text(encoding="utf-8")
+    assert "Context Exposure Controls" in report_text
+    assert "Retrieval-only AUC" in report_text
+    assert "answer_censored" in report_text

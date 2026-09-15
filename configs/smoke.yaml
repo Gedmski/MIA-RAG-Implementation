@@ -78,6 +78,8 @@ runtime:
   calibrate_threshold: true
   bootstrap_iterations: 100
   avoid_query_answer_leakage: true
+  context_mode: full
+  mask_fraction:
   continue_on_error: true
   limit_runs: 6
   llm_temperature: 0.0

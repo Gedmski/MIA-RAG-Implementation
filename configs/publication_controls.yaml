@@ -1,0 +1,100 @@
+paths:
+  results_root: results
+  legacy_experiment_log: experiment_results.md
+  legacy_csv: experiment_data.csv
+  legacy_report: results_report.md
+
+datasets:
+  healthcaremagic:
+    loader: healthcaremagic
+    enabled: true
+    dataset_id: RafaelMPereira/HealthCareMagic-100k-Chat-Format-en
+    split: train
+    index_size: 2000
+    eval_size: 200
+    calibration_size: 100
+    min_chars: 200
+    max_chars: 2500
+    chunk_chars: 500
+    chunk_overlap: 75
+    text_fields:
+      - text
+  fiqa:
+    loader: fiqa
+    enabled: true
+    dataset_id: BeIR/fiqa
+    dataset_config: corpus
+    split: corpus
+    index_size: 2000
+    eval_size: 200
+    calibration_size: 100
+    min_chars: 120
+    max_chars: 2500
+    chunk_chars: 500
+    chunk_overlap: 75
+
+models:
+  llama3:
+    provider: ollama
+    model_name: llama3
+    family: llama3
+    size_label: default
+    closed_weights: false
+
+retrievers:
+  faiss:
+    enabled: true
+
+embeddings:
+  all-minilm-l6-v2:
+    provider: huggingface
+    model_name: sentence-transformers/all-MiniLM-L6-v2
+
+runtime:
+  proxy_model: gpt2
+  masking_strategy: hard
+  use_spelling_correction: true
+  seed: 42
+  gamma: 0.5
+  calibrate_threshold: true
+  bootstrap_iterations: 1000
+  avoid_query_answer_leakage: true
+  context_mode: full
+  mask_fraction: 0.20
+  continue_on_error: true
+  limit_runs:
+  llm_temperature: 0.0
+
+reporting:
+  generate_plots: true
+  copy_legacy_outputs: false
+
+defaults:
+  dataset: healthcaremagic
+  model: llama3
+  retriever: faiss
+  embedding: all-minilm-l6-v2
+  num_masks: 10
+  retriever_k: 5
+  gamma: 0.5
+  mask_fraction: 0.20
+
+studies:
+  context_exposure_controls:
+    description: Compare full context, no context, answer-censored context, and answer-chunk exclusion.
+    overrides: {}
+    sweep:
+      dataset:
+        - healthcaremagic
+        - fiqa
+      context_mode:
+        - full
+        - none
+        - answer_censored
+        - leave_one_chunk_out
+      seed:
+        - 42
+        - 1337
+        - 2027
+        - 31415
+        - 65537

@@ -8,6 +8,7 @@ This repository now uses a package-based layout for the Mask-Based Membership In
 - `configs/default.yaml`: legacy full experiment sweep across baseline and new datasets
 - `configs/smoke.yaml`: small legacy sweep for validation in a separate VM
 - `configs/lean_ablation.yaml`: study-driven lean ablation plan with shared defaults and named study blocks
+- `configs/publication_controls.yaml`: larger repeated-seed context-exposure study for paper-facing results
 - `docs/MBMIA_EVALUATION_PROTOCOL.md`: publication-oriented controls for mask-based MIA evaluation
 - `results/`: canonical structured outputs for each invocation
 - `mia_rag_attack.py`: compatibility wrapper for `python mia_rag_attack.py --config <yaml>`
@@ -54,6 +55,13 @@ For the study-driven lean ablation layout:
 python mia_rag_attack.py --config configs/lean_ablation.yaml
 ```
 
+For the larger context-control evaluation (2,000 indexed documents, 200 evaluation examples per class,
+100 calibration examples per class, and five seeds):
+
+```bash
+python mia_rag_attack.py --config configs/publication_controls.yaml
+```
+
 The current lean ablation config includes:
 
 - `ablation_model_family`
@@ -75,6 +83,9 @@ The current configs use the journal-oriented MBMIA controls by default:
 - chunked RAG indexing with parent-document retrieval-hit diagnostics
 - exact and near-duplicate checks for non-member contamination
 - masked-query answer leakage and retrieved-context answer coverage diagnostics
+- full, no-context, answer-censored, and leave-one-chunk-out context conditions
+- retrieval-only overlap AUC and per-example diagnostic records in `runs.jsonl`
+- optional fractional masking through `mask_fraction`
 
 The `ablation_gamma` study intentionally disables threshold calibration so it can measure fixed-threshold sensitivity. Other studies should normally keep calibration enabled.
 
@@ -155,6 +166,7 @@ In study-driven mode:
 - each `studies.<name>.sweep` block varies only the factors named in that study
 - supported study fields are `dataset`, `model`, `retriever`, `embedding`, `num_masks`, `retriever_k`, `gamma`, `index_size`, `eval_size`, and `seed`
 - publication-control fields are also supported: `calibration_size`, `calibrate_threshold`, `bootstrap_iterations`, `chunk_chars`, and `chunk_overlap`
+- context-control fields are supported: `context_mode` and `mask_fraction`
 
 Optional model metadata keys are also supported in the `models` section:
 
